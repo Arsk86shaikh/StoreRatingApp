@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 
-export default function SignupForm() {
+export default function SignupForm({ onSuccess }) {
   const navigate = useNavigate();
   const { signup } = useAuth();
   const [loading, setLoading] = useState(false);
@@ -29,8 +29,10 @@ export default function SignupForm() {
       setError('Name is required');
       return false;
     }
-    if (formData.name.trim().length < 3) {
-      setError('Name must be at least 3 characters');
+    // Spec requires 20-60 characters (not 3) — matches backend/DB constraint
+    // on profiles.full_name: check (char_length(full_name) >= 20 and <= 60)
+    if (formData.name.trim().length < 20) {
+      setError('Name must be at least 20 characters');
       return false;
     }
     if (formData.name.trim().length > 60) {
@@ -91,10 +93,14 @@ export default function SignupForm() {
       await signup({
         email: formData.email,
         password: formData.password,
-        name: formData.name,
-        address: formData.address,
+        name: formData.name.trim(),
+        address: formData.address.trim(),
       });
-      navigate('/login');
+      if (onSuccess) {
+        onSuccess();
+      } else {
+        navigate('/login');
+      }
     } catch (err) {
       setError(err.message || 'Signup failed. Please try again.');
     } finally {
@@ -113,12 +119,12 @@ export default function SignupForm() {
           name="name"
           value={formData.name}
           onChange={handleChange}
-          placeholder="Enter your full name"
+          placeholder="Enter your full name (min 20 characters)"
           className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
         />
         {formData.name && (
-          <p className="text-xs text-gray-500 mt-1">
-            {formData.name.length}/60 characters
+          <p className={`text-xs mt-1 ${formData.name.trim().length >= 20 && formData.name.trim().length <= 60 ? 'text-green-600' : 'text-gray-500'}`}>
+            {formData.name.length}/60 characters (min 20)
           </p>
         )}
       </div>

@@ -1,125 +1,138 @@
 import { useState } from 'react';
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
-// import{useAuth} from "../contexts/AuthContext";
-import Navbar from '../components/common/Navbar';
-import Sidebar from '../components/common/Sidebar';
-import Footer from '../components/common/Footer';
+import { useAuth } from '../contexts/AuthContext';
 
 export default function DashboardLayout() {
-  const { logout, profile } = useAuth();
+  const { user, profile, signOut } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   const [sidebarOpen, setSidebarOpen] = useState(true);
 
-  const handleLogout = async () => {
-    try {
-      await logout();
-      navigate('/login');
-    } catch (error) {
-      console.error('Logout error:', error);
+  const handleSignOut = async () => {
+    if (window.confirm('Are you sure you want to sign out?')) {
+      await signOut();
+      navigate('/login', { replace: true });
     }
   };
 
-  const getNavItems = () => {
-    if (!profile) return [];
-
+  // Determine which menu items to show based on role
+  const getMenuItems = () => {
     const baseItems = [
-      { label: 'Profile', path: `/${profile.role}/profile` },
+      { label: 'Dashboard', path: '/dashboard/user', icon: '📊' },
+      { label: 'Browse Stores', path: '/user/stores', icon: '🏪' },
+      { label: 'Profile', path: '/user/profile', icon: '👤' },
     ];
 
-    if (profile.role === 'admin') {
+    if (profile?.role === 'admin') {
       return [
-        { label: 'Dashboard', path: '/admin/dashboard' },
-        { label: 'Users', path: '/admin/users' },
-        { label: 'Stores', path: '/admin/stores' },
-        ...baseItems,
+        { label: 'Admin Dashboard', path: '/admin/dashboard', icon: '⚙️' },
+        { label: 'Manage Users', path: '/admin/users', icon: '👥' },
+        { label: 'Manage Stores', path: '/admin/stores', icon: '🏪' },
       ];
     }
 
-    if (profile.role === 'user') {
+    if (profile?.role === 'store_owner') {
       return [
-        { label: 'Dashboard', path: '/user/dashboard' },
-        { label: 'Stores', path: '/user/stores' },
-        ...baseItems,
-      ];
-    }
-
-    if (profile.role === 'store_owner') {
-      return [
-        { label: 'Dashboard', path: '/owner/dashboard' },
-        { label: 'Analytics', path: '/owner/analytics' },
-        ...baseItems,
+        { label: 'Dashboard', path: '/owner/dashboard', icon: '📊' },
+        { label: 'Analytics', path: '/owner/analytics', icon: '📈' },
+        { label: 'Profile', path: '/owner/profile', icon: '👤' },
       ];
     }
 
     return baseItems;
   };
 
-  const navItems = getNavItems();
+  const menuItems = getMenuItems();
+  const isActive = (path) => location.pathname === path;
 
   return (
-    <div className="flex flex-col min-h-screen bg-gray-100">
-      {/* Navbar */}
-      <Navbar />
-
-      <div className="flex flex-1">
-        {/* Sidebar */}
-        <aside
-          className={`${
-            sidebarOpen ? 'w-64' : 'w-20'
-          } bg-gray-900 text-white transition-all duration-300 shadow-lg`}
-        >
-          <div className="p-4 border-b border-gray-700">
-            <button
-              onClick={() => setSidebarOpen(!sidebarOpen)}
-              className="text-gray-400 hover:text-white"
-            >
-              {sidebarOpen ? '✕' : '☰'}
-            </button>
-          </div>
-
-          <nav className="p-4 space-y-2">
-            {navItems.map((item) => (
-              <a
-                key={item.path}
-                href={item.path}
-                className={`block px-4 py-2 rounded-lg transition ${
-                  location.pathname === item.path
-                    ? 'bg-indigo-600 text-white'
-                    : 'text-gray-300 hover:bg-gray-800'
-                } ${!sidebarOpen && 'text-center'}`}
-              >
-                {sidebarOpen ? item.label : item.label.charAt(0)}
-              </a>
-            ))}
-
-            <hr className="border-gray-700 my-4" />
-
-            <button
-              onClick={handleLogout}
-              className="w-full text-left px-4 py-2 text-gray-300 hover:bg-red-600 rounded-lg transition"
-            >
-              {sidebarOpen ? 'Logout' : '✕'}
-            </button>
-          </nav>
-
+    <div className="flex h-screen bg-gray-100">
+      {/* Sidebar */}
+      <div
+        className={`${
+          sidebarOpen ? 'w-64' : 'w-20'
+        } bg-indigo-700 text-white transition-all duration-300 flex flex-col shadow-lg`}
+      >
+        {/* Logo */}
+        <div className="h-16 flex items-center justify-center border-b border-indigo-600">
+          <button
+            onClick={() => setSidebarOpen(!sidebarOpen)}
+            className="p-2 hover:bg-indigo-600 rounded-lg transition"
+          >
+            {sidebarOpen ? '◀' : '▶'}
+          </button>
           {sidebarOpen && (
-            <div className="absolute bottom-4 left-4 right-4 p-3 bg-gray-800 rounded-lg text-xs">
-              <p className="text-gray-400">Logged in as:</p>
-              <p className="font-bold text-white truncate">{profile?.name}</p>
-              <p className="text-gray-500 capitalize">{profile?.role}</p>
-            </div>
+            <h1 className="text-2xl font-bold ml-2">StoreRate</h1>
           )}
-        </aside>
+        </div>
 
-        {/* Main Content */}
-        <main className="flex-1 flex flex-col overflow-hidden">
-          <div className="flex-1 overflow-auto p-6">
+        {/* Menu Items */}
+        <nav className="flex-1 p-4 space-y-2">
+          {menuItems.map((item) => (
+            <button
+              key={item.path}
+              onClick={() => navigate(item.path)}
+              className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition ${
+                isActive(item.path)
+                  ? 'bg-indigo-600 font-semibold'
+                  : 'hover:bg-indigo-600'
+              }`}
+              title={!sidebarOpen ? item.label : ''}
+            >
+              <span className="text-xl">{item.icon}</span>
+              {sidebarOpen && <span>{item.label}</span>}
+            </button>
+          ))}
+        </nav>
+
+        {/* User Profile & Sign Out */}
+        <div className="border-t border-indigo-600 p-4">
+          <div className="flex items-center gap-3 mb-4 pb-4 border-b border-indigo-600">
+            <div className="w-10 h-10 bg-indigo-600 rounded-full flex items-center justify-center text-lg">
+              {profile?.full_name?.charAt(0).toUpperCase() || '👤'}
+            </div>
+            {sidebarOpen && (
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-semibold truncate">
+                  {profile?.full_name || 'User'}
+                </p>
+                <p className="text-xs text-indigo-200 truncate capitalize">
+                  {profile?.role || 'user'}
+                </p>
+              </div>
+            )}
+          </div>
+          <button
+            onClick={handleSignOut}
+            className="w-full flex items-center gap-3 px-4 py-2 bg-red-600 hover:bg-red-700 rounded-lg transition font-medium"
+          >
+            <span className="text-lg">🚪</span>
+            {sidebarOpen && <span>Sign Out</span>}
+          </button>
+        </div>
+      </div>
+
+      {/* Main Content */}
+      <div className="flex-1 flex flex-col overflow-hidden">
+        {/* Header */}
+        <header className="bg-white shadow-sm h-16 flex items-center px-8 border-b border-gray-200">
+          <div className="flex-1">
+            <h2 className="text-xl font-semibold text-gray-900">
+              {menuItems.find((item) => isActive(item.path))?.label || 'Dashboard'}
+            </h2>
+          </div>
+          <div className="flex items-center gap-4">
+            <span className="text-gray-600 text-sm">
+              {user?.email}
+            </span>
+          </div>
+        </header>
+
+        {/* Page Content */}
+        <main className="flex-1 overflow-auto bg-gray-50">
+          <div className="container mx-auto px-8 py-8">
             <Outlet />
           </div>
-
-          {/* Footer */}
-          <Footer />
         </main>
       </div>
     </div>

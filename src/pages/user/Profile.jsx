@@ -1,7 +1,9 @@
 import { useState } from 'react';
 import PasswordUpdateForm from '../../components/forms/PasswordUpdateForm';
+import { useAuth } from '../../contexts/AuthContext';
 
 export default function Profile() {
+  const { profile, user } = useAuth();
   const [activeTab, setActiveTab] = useState('profile');
 
   return (
@@ -40,25 +42,38 @@ export default function Profile() {
         <div className="bg-white rounded-lg shadow-md p-6">
           <h2 className="text-2xl font-bold text-gray-900 mb-6">Profile Information</h2>
           <div className="space-y-4">
-            <p className="text-gray-600">
-              Your profile information is read-only. Contact support to make changes.
-            </p>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="p-4 bg-gray-50 rounded-lg">
                 <p className="text-sm text-gray-600">Name</p>
-                <p className="text-lg font-semibold text-gray-900">Your Name</p>
+                <p className="text-lg font-semibold text-gray-900">
+                  {profile?.full_name || 'N/A'}
+                </p>
               </div>
               <div className="p-4 bg-gray-50 rounded-lg">
                 <p className="text-sm text-gray-600">Email</p>
-                <p className="text-lg font-semibold text-gray-900">your@email.com</p>
+                <p className="text-lg font-semibold text-gray-900">
+                  {user?.email || 'N/A'}
+                </p>
               </div>
               <div className="p-4 bg-gray-50 rounded-lg md:col-span-2">
                 <p className="text-sm text-gray-600">Address</p>
-                <p className="text-lg font-semibold text-gray-900">Your Address</p>
+                <p className="text-lg font-semibold text-gray-900">
+                  {profile?.address || 'Not provided'}
+                </p>
               </div>
               <div className="p-4 bg-gray-50 rounded-lg">
                 <p className="text-sm text-gray-600">Role</p>
-                <p className="text-lg font-semibold text-gray-900">Normal User</p>
+                <p className="text-lg font-semibold text-gray-900 capitalize">
+                  {profile?.role === 'user' ? 'Normal User' : profile?.role || 'User'}
+                </p>
+              </div>
+              <div className="p-4 bg-gray-50 rounded-lg">
+                <p className="text-sm text-gray-600">Member Since</p>
+                <p className="text-lg font-semibold text-gray-900">
+                  {profile?.created_at
+                    ? new Date(profile.created_at).toLocaleDateString()
+                    : 'N/A'}
+                </p>
               </div>
             </div>
           </div>

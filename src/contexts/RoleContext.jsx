@@ -1,27 +1,23 @@
-import { createContext, useContext } from 'react'
-import { AuthContext } from './AuthContext'
+export const ROLES = {
+  ADMIN: 'admin',
+  USER: 'user',
+  STORE_OWNER: 'store_owner',
+};
 
-export const RoleContext = createContext(null)
+export const ROLE_LABELS = {
+  admin: 'Administrator',
+  user: 'Normal User',
+  store_owner: 'Store Owner',
+};
 
-export const RoleProvider = ({ children }) => {
-  const { user } = useContext(AuthContext)
+export const ROLE_HOME = {
+  admin: '/admin/dashboard',
+  user: '/user/dashboard',
+  store_owner: '/owner/dashboard',
+};
 
-  const role = user?.role || null
-
-  const value = {
-    role,
-    isAdmin: role === 'admin',
-    isUser: role === 'user',
-    isStoreOwner: role === 'store_owner',
-  }
-
-  return <RoleContext.Provider value={value}>{children}</RoleContext.Provider>
-}
-
-export const useRole = () => {
-  const context = useContext(RoleContext)
-  if (!context) throw new Error('useRole must be used within a RoleProvider')
-  return context
-}
-
-export default useRole
+export const ROLE_OPTIONS = [
+  { value: 'user', label: 'Normal User' },
+  { value: 'store_owner', label: 'Store Owner' },
+  { value: 'admin', label: 'Administrator' },
+];

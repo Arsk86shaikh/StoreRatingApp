@@ -1,59 +1,32 @@
-import { useState, useEffect } from 'react';
-import StoreCard from './StoreCard';
-import SearchFilter from '../common/SearchFilter';
-import Pagination from '../common/Pagination';
+import { useState } from 'react';
 
-export default function StoreList({ stores = [], userRatings = {}, onRatingSubmit, loading = false }) {
-  const [filteredStores, setFilteredStores] = useState(stores);
-  const [searchTerm, setSearchTerm] = useState('');
-  const [currentPage, setCurrentPage] = useState(1);
-  const itemsPerPage = 6;
+export default function StoreList({ stores, userRatings, onRatingSubmit }) {
+  const [selectedStoreId, setSelectedStoreId] = useState(null);
+  const [selectedRating, setSelectedRating] = useState(0);
+  const [submitting, setSubmitting] = useState(false);
 
-  useEffect(() => {
-    if (!searchTerm.trim()) {
-      setFilteredStores(stores);
-    } else {
-      const term = searchTerm.toLowerCase();
-      const filtered = stores.filter((store) => 
-        store.name.toLowerCase().includes(term) ||
-        store.address.toLowerCase().includes(term) ||
-        store.email.toLowerCase().includes(term)
-      );
-      setFilteredStores(filtered);
-      setCurrentPage(1);
-    }
-  }, [searchTerm, stores]);
-
-  const totalPages = Math.ceil(filteredStores.length / itemsPerPage);
-  const startIdx = (currentPage - 1) * itemsPerPage;
-  const endIdx = startIdx + itemsPerPage;
-  const paginatedStores = filteredStores.slice(startIdx, endIdx);
-
-  const handleSearch = (value) => {
-    setSearchTerm(value);
+  const handleRatingChange = (storeId, rating) => {
+    setSelectedStoreId(storeId);
+    setSelectedRating(rating);
   };
 
-  const handleNextPage = () => {
-    if (currentPage < totalPages) {
-      setCurrentPage(currentPage + 1);
+  const handleSubmit = async (storeId) => {
+    try {
+      setSubmitting(true);
+      await onRatingSubmit({
+        storeId,
+        rating: selectedRating || userRatings[storeId] || 0,
+      });
+      setSelectedStoreId(null);
+      setSelectedRating(0);
+    } catch (error) {
+      console.error('Error submitting rating:', error);
+    } finally {
+      setSubmitting(false);
     }
   };
 
-  const handlePrevPage = () => {
-    if (currentPage > 1) {
-      setCurrentPage(currentPage - 1);
-    }
-  };
-
-  if (loading) {
-    return (
-      <div className="flex justify-center items-center h-96">
-        <div className="h-12 w-12 rounded-full border-4 border-indigo-600 border-t-transparent animate-spin"></div>
-      </div>
-    );
-  }
-
-  if (stores.length === 0) {
+  if (!stores || stores.length === 0) {
     return (
       <div className="text-center py-12">
         <p className="text-gray-500 text-lg">No stores available</p>
@@ -62,83 +35,100 @@ export default function StoreList({ stores = [], userRatings = {}, onRatingSubmi
   }
 
   return (
-    <div className="space-y-6">
-      {/* Search Filter */}
-      <div className="bg-white p-4 rounded-lg shadow">
-        <label className="block text-sm font-medium text-gray-700 mb-2">
-          Search by Store Name or Address
-        </label>
-        <SearchFilter 
-          value={searchTerm}
-          onChange={handleSearch}
-          placeholder="Search stores..."
-        />
-        {filteredStores.length > 0 && (
-          <p className="text-sm text-gray-600 mt-2">
-            Found {filteredStores.length} store{filteredStores.length !== 1 ? 's' : ''}
-          </p>
-        )}
-      </div>
+    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+      {stores.map((store) => {
+        const userRating = userRatings[store.id] || 0;
+        const isSelected = selectedStoreId === store.id;
 
-      {/* Store Grid */}
-      {filteredStores.length === 0 ? (
-        <div className="text-center py-12 bg-white rounded-lg">
-          <p className="text-gray-500 text-lg">No stores match your search</p>
-        </div>
-      ) : (
-        <>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {paginatedStores.map((store) => (
-              <StoreCard
-                key={store.id}
-                store={store}
-                userRating={userRatings[store.id]}
-                onRatingSubmit={onRatingSubmit}
-              />
-            ))}
-          </div>
+        return (
+          <div
+            key={store.id}
+            className="bg-white rounded-lg shadow hover:shadow-lg transition border border-gray-200"
+          >
+            <div className="p-6">
+              {/* Store Header */}
+              <h3 className="text-xl font-bold text-gray-900 mb-2">{store.name}</h3>
 
-          {/* Pagination */}
-          {totalPages > 1 && (
-            <div className="flex justify-center items-center gap-3">
-              <button
-                onClick={handlePrevPage}
-                disabled={currentPage === 1}
-                className="px-4 py-2 bg-gray-300 text-gray-700 rounded-lg hover:bg-gray-400 disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                Previous
-              </button>
-
-              <div className="flex gap-2">
-                {[...Array(totalPages)].map((_, i) => {
-                  const page = i + 1;
-                  return (
-                    <button
-                      key={page}
-                      onClick={() => setCurrentPage(page)}
-                      className={`px-3 py-2 rounded-lg font-medium ${
-                        currentPage === page
-                          ? 'bg-indigo-600 text-white'
-                          : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
-                      }`}
-                    >
-                      {page}
-                    </button>
-                  );
-                })}
+              {/* Store Details */}
+              <div className="space-y-2 mb-4 text-sm text-gray-600">
+                {store.address && (
+                  <p className="flex items-start gap-2">
+                    <span>📍</span>
+                    <span>{store.address}</span>
+                  </p>
+                )}
+                {store.phone && (
+                  <p className="flex items-center gap-2">
+                    <span>📞</span>
+                    <span>{store.phone}</span>
+                  </p>
+                )}
+                {store.email && (
+                  <p className="flex items-center gap-2">
+                    <span>📧</span>
+                    <span>{store.email}</span>
+                  </p>
+                )}
+                {store.category && (
+                  <p className="flex items-center gap-2">
+                    <span>🏷️</span>
+                    <span className="capitalize">{store.category}</span>
+                  </p>
+                )}
               </div>
 
-              <button
-                onClick={handleNextPage}
-                disabled={currentPage === totalPages}
-                className="px-4 py-2 bg-gray-300 text-gray-700 rounded-lg hover:bg-gray-400 disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                Next
-              </button>
+              {/* Current Rating */}
+              {userRating > 0 && !isSelected && (
+                <div className="mb-4 p-3 bg-green-50 border border-green-200 rounded-lg">
+                  <p className="text-xs text-green-600 font-medium mb-1">Your Rating</p>
+                  <div className="flex items-center gap-1">
+                    {[...Array(5)].map((_, i) => (
+                      <span
+                        key={i}
+                        className={i < Math.round(userRating) ? 'text-lg' : 'text-lg opacity-20'}
+                      >
+                        ⭐
+                      </span>
+                    ))}
+                    <span className="ml-2 font-semibold text-green-700">{userRating}/5</span>
+                  </div>
+                </div>
+              )}
+
+              {/* Rating Stars */}
+              <div className="mb-4">
+                <p className="text-xs font-medium text-gray-600 mb-2">Rate this store</p>
+                <div className="flex gap-2">
+                  {[1, 2, 3, 4, 5].map((star) => (
+                    <button
+                      key={star}
+                      onClick={() => handleRatingChange(store.id, star)}
+                      className={`text-2xl transition transform hover:scale-110 ${
+                        (isSelected ? selectedRating : userRating) >= star
+                          ? 'text-yellow-400'
+                          : 'text-gray-300'
+                      }`}
+                    >
+                      ⭐
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Submit Button */}
+              {isSelected && selectedRating > 0 && (
+                <button
+                  onClick={() => handleSubmit(store.id)}
+                  disabled={submitting}
+                  className="w-full bg-indigo-600 hover:bg-indigo-700 disabled:bg-gray-400 text-white font-medium py-2 px-4 rounded-lg transition"
+                >
+                  {submitting ? 'Saving...' : 'Save Rating'}
+                </button>
+              )}
             </div>
-          )}
-        </>
-      )}
+          </div>
+        );
+      })}
     </div>
   );
 }

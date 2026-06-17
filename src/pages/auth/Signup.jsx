@@ -1,225 +1,341 @@
 import { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
-import { Eye, EyeOff, UserPlus, Store } from 'lucide-react';
+import { useNavigate, Link } from 'react-router-dom';
 import { authService } from '../../services/authService';
+import { ROLE_OPTIONS, ROLE_LABELS } from '../../constants/roles';
 
 export default function Signup() {
   const navigate = useNavigate();
-
-  const [form, setForm] = useState({
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
+  const [formData, setFormData] = useState({
     full_name: '',
     email: '',
-    address: '',
     password: '',
     confirmPassword: '',
+    address: '',
+    role: 'user',
   });
-  const [errors, setErrors] = useState({});
-  const [showPwd, setShowPwd] = useState(false);
-  const [showConfirm, setShowConfirm] = useState(false);
-  const [loading, setLoading] = useState(false);
-  const [serverError, setServerError] = useState('');
-  const [success, setSuccess] = useState(false);
 
   const handleChange = (e) => {
     const { name, value } = e.target;
-    setForm((p) => ({ ...p, [name]: value }));
-    setErrors((p) => ({ ...p, [name]: '' }));
-    setServerError('');
+    setFormData((prev) => ({
+      ...prev,
+      [name]: value,
+    }));
+    setError('');
   };
 
-  const validate = () => {
-    const errs = {};
+  const validateForm = () => {
+    // Full name validation - MUST match DB constraint (20-60 chars)
+    if (!formData.full_name.trim()) {
+      throw new Error('Full name is required');
+    }
 
-    if (!form.full_name.trim()) errs.full_name = 'Full name is required';
-    else if (form.full_name.trim().length < 20) errs.full_name = 'Name must be at least 20 characters';
-    else if (form.full_name.trim().length > 60) errs.full_name = 'Name must be at most 60 characters';
+    if (formData.full_name.length < 20) {
+      throw new Error('Full name must be at least 20 characters');
+    }
 
-    if (!form.email) errs.email = 'Email is required';
-    else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email)) errs.email = 'Enter a valid email address';
+    if (formData.full_name.length > 60) {
+      throw new Error('Full name must not exceed 60 characters');
+    }
 
-    if (!form.address.trim()) errs.address = 'Address is required';
-    else if (form.address.trim().length > 400) errs.address = 'Address must be at most 400 characters';
+    // Email validation
+    if (!formData.email.trim()) {
+      throw new Error('Email is required');
+    }
 
-    if (!form.password) errs.password = 'Password is required';
-    else if (form.password.length < 8) errs.password = 'Password must be at least 8 characters';
-    else if (!/[A-Z]/.test(form.password)) errs.password = 'Must include at least one uppercase letter';
-    else if (!/[!@#$%^&*(),.?":{}|<>]/.test(form.password)) errs.password = 'Must include at least one special character';
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.email)) {
+      throw new Error('Please enter a valid email address');
+    }
 
-    if (!form.confirmPassword) errs.confirmPassword = 'Please confirm your password';
-    else if (form.password !== form.confirmPassword) errs.confirmPassword = 'Passwords do not match';
+    // Password validation
+    if (!formData.password) {
+      throw new Error('Password is required');
+    }
 
-    return errs;
+    if (formData.password.length < 6) {
+      throw new Error('Password must be at least 6 characters');
+    }
+
+    if (formData.password !== formData.confirmPassword) {
+      throw new Error('Passwords do not match');
+    }
+
+    // Address validation - MUST match DB constraint (max 400 chars)
+    if (formData.address && formData.address.length > 400) {
+      throw new Error('Address must not exceed 400 characters');
+    }
+
+    // Role validation
+    if (!formData.role) {
+      throw new Error('Please select a role');
+    }
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    const errs = validate();
-    if (Object.keys(errs).length) { setErrors(errs); return; }
-
+    setError('');
+    setSuccess('');
     setLoading(true);
+
     try {
-      await authService.signUp({
-        email: form.email,
-        password: form.password,
-        full_name: form.full_name.trim(),
-        address: form.address.trim(),
-        role: 'user',
+      console.log('📝 Starting validation...');
+      
+      // Validate form first
+      validateForm();
+
+      console.log('✅ Form validation passed');
+      console.log('📤 Submitting signup with data:', {
+        full_name: formData.full_name,
+        email: formData.email,
+        role: formData.role,
+        address: formData.address,
       });
-      setSuccess(true);
+
+      // Call signup service
+      const result = await authService.signUp({
+        full_name: formData.full_name,
+        email: formData.email,
+        password: formData.password,
+        address: formData.address || null,
+        role: formData.role,
+      });
+
+      if (result.success) {
+        console.log('✅ Signup successful! Account created.');
+        setSuccess(
+          `✅ Account created successfully as ${ROLE_LABELS[formData.role]}!\n\nPlease check your email for verification.\n\nRedirecting to login in 3 seconds...`
+        );
+
+        // Clear form
+        setFormData({
+          full_name: '',
+          email: '',
+          password: '',
+          confirmPassword: '',
+          address: '',
+          role: 'user',
+        });
+
+        // Wait 3 seconds then redirect to login
+        setTimeout(() => {
+          console.log('🔀 Redirecting to login...');
+          navigate('/login');
+        }, 3000);
+      } else {
+        console.error('❌ Signup failed:', result.error);
+        setError(result.error || 'Signup failed. Please try again.');
+        setLoading(false);
+      }
     } catch (err) {
-      setServerError(err.message || 'Registration failed. Please try again.');
-    } finally {
+      console.error('❌ Error during signup:', err.message);
+      setError(err.message || 'Signup failed. Please try again.');
       setLoading(false);
     }
   };
 
-  if (success) {
-    return (
-      <div className="min-h-screen bg-gradient-to-br from-indigo-50 via-white to-purple-50 flex items-center justify-center p-4">
-        <div className="w-full max-w-md bg-white rounded-2xl shadow-xl border border-gray-100 p-8 text-center">
-          <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
-            <svg className="w-8 h-8 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-            </svg>
-          </div>
-          <h2 className="text-2xl font-bold text-gray-900 mb-2">Account created!</h2>
-          <p className="text-gray-500 mb-6">Check your email to confirm your account, then sign in.</p>
-          <Link
-            to="/login"
-            className="inline-flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold px-6 py-2.5 rounded-lg transition-colors"
-          >
-            Go to Login
-          </Link>
-        </div>
-      </div>
-    );
-  }
-
-  const pwdInputClass = (name) =>
-    `w-full px-4 py-2.5 pr-10 rounded-lg border text-sm outline-none transition-all ${
-      errors[name]
-        ? 'border-red-400 bg-red-50 focus:ring-2 focus:ring-red-300'
-        : 'border-gray-300 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200'
-    }`;
-
   return (
-    <div className="min-h-screen bg-gradient-to-br from-indigo-50 via-white to-purple-50 flex items-center justify-center p-4 py-8">
-      <div className="w-full max-w-md">
+    <div className="min-h-screen bg-gradient-to-br from-green-500 to-blue-600 flex items-center justify-center p-4">
+      <div className="w-full max-w-md bg-white rounded-lg shadow-2xl p-8">
+        {/* Header */}
         <div className="text-center mb-8">
-          <div className="inline-flex items-center justify-center w-16 h-16 bg-indigo-600 rounded-2xl mb-4 shadow-lg">
-            <Store className="w-8 h-8 text-white" />
-          </div>
-          <h1 className="text-3xl font-bold text-gray-900">StoreRate</h1>
-          <p className="text-gray-500 mt-1">Create your free account</p>
+          <h1 className="text-3xl font-bold text-gray-900 mb-2">Create Account</h1>
+          <p className="text-gray-600">Join our platform today</p>
         </div>
 
-        <div className="bg-white rounded-2xl shadow-xl border border-gray-100 p-8">
-          {serverError && (
-            <div className="mb-5 p-3 rounded-lg bg-red-50 border border-red-200 text-red-700 text-sm">
-              {serverError}
-            </div>
-          )}
+        {/* Success Message */}
+        {success && (
+          <div className="mb-4 p-4 bg-green-50 border border-green-200 rounded-lg animate-pulse">
+            <p className="text-green-700 text-sm font-medium whitespace-pre-line">{success}</p>
+          </div>
+        )}
 
-          <form onSubmit={handleSubmit} noValidate className="space-y-5">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1.5">Full Name</label>
-              <input
-                type="text"
-                name="full_name"
-                value={form.full_name}
-                onChange={handleChange}
-                placeholder="Enter your full name (min. 20 characters)"
-                className={`w-full px-4 py-2.5 rounded-lg border text-sm outline-none transition-all
-                  ${errors.full_name ? 'border-red-400 bg-red-50 focus:ring-2 focus:ring-red-300' : 'border-gray-300 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200'}`}
-              />
-              <div className="flex justify-between mt-1">
-                {errors.full_name
-                  ? <p className="text-xs text-red-500">{errors.full_name}</p>
-                  : <span />}
-                <p className="text-xs text-gray-400">{form.full_name.length}/60</p>
-              </div>
-            </div>
+        {/* Error Message */}
+        {error && (
+          <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg">
+            <p className="text-red-700 text-sm font-medium">{error}</p>
+          </div>
+        )}
 
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1.5">Email address</label>
-              <input
-                type="email"
-                name="email"
-                value={form.email}
-                onChange={handleChange}
-                placeholder="you@example.com"
-                className={`w-full px-4 py-2.5 rounded-lg border text-sm outline-none transition-all
-                  ${errors.email ? 'border-red-400 bg-red-50 focus:ring-2 focus:ring-red-300' : 'border-gray-300 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200'}`}
-              />
-              {errors.email && <p className="mt-1 text-xs text-red-500">{errors.email}</p>}
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1.5">Address</label>
-              <textarea
-                name="address"
-                value={form.address}
-                onChange={handleChange}
-                placeholder="Your full address"
-                rows={2}
-                className={`w-full px-4 py-2.5 rounded-lg border text-sm outline-none transition-all resize-none
-                  ${errors.address ? 'border-red-400 bg-red-50 focus:ring-2 focus:ring-red-300' : 'border-gray-300 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200'}`}
-              />
-              {errors.address && <p className="mt-1 text-xs text-red-500">{errors.address}</p>}
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1.5">Password</label>
-              <div className="relative">
-                <input
-                  type={showPwd ? 'text' : 'password'}
-                  name="password"
-                  value={form.password}
-                  onChange={handleChange}
-                  placeholder="Min 8 chars, 1 uppercase, 1 special"
-                  className={pwdInputClass('password')}
-                />
-                <button type="button" onClick={() => setShowPwd(p => !p)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600" tabIndex={-1}>
-                  {showPwd ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                </button>
-              </div>
-              {errors.password && <p className="mt-1 text-xs text-red-500">{errors.password}</p>}
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1.5">Confirm Password</label>
-              <div className="relative">
-                <input
-                  type={showConfirm ? 'text' : 'password'}
-                  name="confirmPassword"
-                  value={form.confirmPassword}
-                  onChange={handleChange}
-                  placeholder="Re-enter your password"
-                  className={pwdInputClass('confirmPassword')}
-                />
-                <button type="button" onClick={() => setShowConfirm(p => !p)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600" tabIndex={-1}>
-                  {showConfirm ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                </button>
-              </div>
-              {errors.confirmPassword && <p className="mt-1 text-xs text-red-500">{errors.confirmPassword}</p>}
-            </div>
-
-            <button
-              type="submit"
+        {/* Form */}
+        <form onSubmit={handleSubmit} className="space-y-4">
+          {/* Full Name - IMPORTANT: 20-60 characters */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Full Name <span className="text-red-500">*</span> (20-60 characters)
+            </label>
+            <input
+              type="text"
+              name="full_name"
+              value={formData.full_name}
+              onChange={handleChange}
+              placeholder="e.g., Muhammad Ahmad Ali Ahmed"
               disabled={loading}
-              className="w-full flex items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-700
-                disabled:opacity-60 text-white font-semibold py-2.5 rounded-lg transition-colors shadow-sm"
-            >
-              {loading ? <span className="animate-spin rounded-full h-4 w-4 border-b-2 border-white" /> : <UserPlus className="w-4 h-4" />}
-              {loading ? 'Creating account…' : 'Create Account'}
-            </button>
-          </form>
+              maxLength="60"
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent outline-none transition disabled:bg-gray-100 disabled:cursor-not-allowed text-sm"
+            />
+            {formData.full_name && (
+              <p className={`text-xs mt-1 ${
+                formData.full_name.length < 20
+                  ? 'text-orange-500'
+                  : formData.full_name.length > 60
+                  ? 'text-red-500'
+                  : 'text-green-500'
+              }`}>
+                {formData.full_name.length}/60 characters
+                {formData.full_name.length < 20 && ` (need ${20 - formData.full_name.length} more)`}
+              </p>
+            )}
+          </div>
 
-          <p className="mt-6 text-center text-sm text-gray-500">
+          {/* Email */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Email Address <span className="text-red-500">*</span>
+            </label>
+            <input
+              type="email"
+              name="email"
+              value={formData.email}
+              onChange={handleChange}
+              placeholder="you@example.com"
+              disabled={loading}
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent outline-none transition disabled:bg-gray-100 disabled:cursor-not-allowed text-sm"
+            />
+          </div>
+
+          {/* Role Selection */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Select Your Role <span className="text-red-500">*</span>
+            </label>
+            <select
+              name="role"
+              value={formData.role}
+              onChange={handleChange}
+              disabled={loading}
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent outline-none transition disabled:bg-gray-100 disabled:cursor-not-allowed text-sm"
+            >
+              {ROLE_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+            <p className="text-xs text-gray-500 mt-1">
+              📌 {ROLE_LABELS[formData.role]}
+            </p>
+          </div>
+
+          {/* Address (Optional) */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Address <span className="text-gray-400">(Optional - max 400 characters)</span>
+            </label>
+            <textarea
+              name="address"
+              value={formData.address}
+              onChange={handleChange}
+              placeholder="Enter your address..."
+              disabled={loading}
+              maxLength="400"
+              rows="2"
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent outline-none transition disabled:bg-gray-100 disabled:cursor-not-allowed text-sm resize-none"
+            />
+            {formData.address && (
+              <p className="text-xs text-gray-500 mt-1">
+                {formData.address.length}/400 characters
+              </p>
+            )}
+          </div>
+
+          {/* Password */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Password <span className="text-red-500">*</span> (minimum 6 characters)
+            </label>
+            <input
+              type="password"
+              name="password"
+              value={formData.password}
+              onChange={handleChange}
+              placeholder="••••••••"
+              disabled={loading}
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent outline-none transition disabled:bg-gray-100 disabled:cursor-not-allowed text-sm"
+            />
+            {formData.password && (
+              <p className={`text-xs mt-1 ${
+                formData.password.length < 6 ? 'text-orange-500' : 'text-green-500'
+              }`}>
+                {formData.password.length < 6
+                  ? `${6 - formData.password.length} more characters needed`
+                  : '✓ Password strength: Good'}
+              </p>
+            )}
+          </div>
+
+          {/* Confirm Password */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Confirm Password <span className="text-red-500">*</span>
+            </label>
+            <input
+              type="password"
+              name="confirmPassword"
+              value={formData.confirmPassword}
+              onChange={handleChange}
+              placeholder="••••••••"
+              disabled={loading}
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent outline-none transition disabled:bg-gray-100 disabled:cursor-not-allowed text-sm"
+            />
+            {formData.confirmPassword && (
+              <p className={`text-xs mt-1 ${
+                formData.password === formData.confirmPassword
+                  ? 'text-green-500'
+                  : 'text-red-500'
+              }`}>
+                {formData.password === formData.confirmPassword
+                  ? '✓ Passwords match'
+                  : '✗ Passwords do not match'}
+              </p>
+            )}
+          </div>
+
+          {/* Submit Button */}
+          <button
+            type="submit"
+            disabled={loading}
+            className="w-full bg-green-600 hover:bg-green-700 disabled:bg-gray-400 text-white font-semibold py-2 rounded-lg transition duration-200 disabled:cursor-not-allowed mt-6"
+          >
+            {loading ? (
+              <span className="flex items-center justify-center">
+                <span className="animate-spin inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full mr-2"></span>
+                Creating Account...
+              </span>
+            ) : (
+              'Create Account'
+            )}
+          </button>
+        </form>
+
+        {/* Divider */}
+        <div className="my-6 flex items-center">
+          <div className="flex-1 border-t border-gray-300"></div>
+          <span className="px-3 text-gray-500 text-sm">or</span>
+          <div className="flex-1 border-t border-gray-300"></div>
+        </div>
+
+        {/* Sign In Link */}
+        <div className="text-center">
+          <p className="text-gray-600 text-sm">
             Already have an account?{' '}
-            <Link to="/login" className="text-indigo-600 font-medium hover:underline">Sign in</Link>
+            <Link
+              to="/login"
+              className="text-green-600 hover:text-green-700 font-semibold transition"
+            >
+              Sign In
+            </Link>
           </p>
         </div>
       </div>

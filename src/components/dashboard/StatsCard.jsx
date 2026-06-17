@@ -1,26 +1,29 @@
-export default function StatsCard({ title, value, icon, color = 'indigo' }) {
+export default function StatsCard({ title, value, icon, color, subtitle }) {
   const colorClasses = {
-    indigo: 'bg-indigo-100 text-indigo-600',
-    blue: 'bg-blue-100 text-blue-600',
-    green: 'bg-green-100 text-green-600',
-    purple: 'bg-purple-100 text-purple-600',
-    red: 'bg-red-100 text-red-600',
+    indigo: 'bg-indigo-50 border-indigo-200',
+    blue: 'bg-blue-50 border-blue-200',
+    green: 'bg-green-50 border-green-200',
+    purple: 'bg-purple-50 border-purple-200',
   };
 
-  const bgColor = colorClasses[color] || colorClasses.indigo;
+  const iconColorClasses = {
+    indigo: 'text-indigo-600',
+    blue: 'text-blue-600',
+    green: 'text-green-600',
+    purple: 'text-purple-600',
+  };
 
   return (
-    <div className="bg-white rounded-lg shadow-md p-6 hover:shadow-lg transition">
-      <div className="flex items-center justify-between">
-        <div>
-          <p className="text-sm text-gray-600 font-medium">{title}</p>
+    <div className={`${colorClasses[color]} border rounded-lg p-6 shadow-sm hover:shadow-md transition`}>
+      <div className="flex items-start justify-between">
+        <div className="flex-1">
+          <p className="text-gray-600 text-sm font-medium">{title}</p>
           <p className="text-3xl font-bold text-gray-900 mt-2">{value}</p>
+          {subtitle && (
+            <p className="text-gray-500 text-xs mt-2">{subtitle}</p>
+          )}
         </div>
-        {icon && (
-          <div className={`${bgColor} p-4 rounded-full`}>
-            <span className="text-2xl">{icon}</span>
-          </div>
-        )}
+        <div className={`text-4xl ${iconColorClasses[color]}`}>{icon}</div>
       </div>
     </div>
   );

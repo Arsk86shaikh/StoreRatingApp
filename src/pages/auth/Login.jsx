@@ -1,138 +1,178 @@
 import { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
-import { Eye, EyeOff, LogIn, Store } from 'lucide-react';
+import { useNavigate, Link } from 'react-router-dom';
 import { authService } from '../../services/authService';
-import { useAuth } from '../../contexts/AuthContext';
 
 export default function Login() {
   const navigate = useNavigate();
-  const { refreshProfile } = useAuth();
-
-  const [form, setForm] = useState({ email: '', password: '' });
-  const [errors, setErrors] = useState({});
-  const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [serverError, setServerError] = useState('');
+  const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
+  const [formData, setFormData] = useState({
+    email: '',
+    password: '',
+  });
 
   const handleChange = (e) => {
     const { name, value } = e.target;
-    setForm((p) => ({ ...p, [name]: value }));
-    setErrors((p) => ({ ...p, [name]: '' }));
-    setServerError('');
-  };
-
-  const validate = () => {
-    const errs = {};
-    if (!form.email) errs.email = 'Email is required';
-    else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email)) errs.email = 'Enter a valid email';
-    if (!form.password) errs.password = 'Password is required';
-    return errs;
+    setFormData((prev) => ({
+      ...prev,
+      [name]: value,
+    }));
+    setError('');
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    const errs = validate();
-    if (Object.keys(errs).length) { setErrors(errs); return; }
-
+    setError('');
+    setSuccess('');
     setLoading(true);
+
     try {
-      await authService.signIn(form);
-      await refreshProfile();
-      // HomeRedirect in AppRoutes handles role-based redirect
-      navigate('/', { replace: true });
+      // Validation
+      if (!formData.email.trim()) {
+        throw new Error('Email is required');
+      }
+
+      if (!formData.password) {
+        throw new Error('Password is required');
+      }
+
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.email)) {
+        throw new Error('Please enter a valid email address');
+      }
+
+      console.log('🔐 Attempting login with email:', formData.email);
+
+      // Sign in
+      const result = await authService.signIn({
+        email: formData.email,
+        password: formData.password,
+      });
+
+      if (result.success) {
+        console.log('✅ Login successful');
+        console.log('User:', result.user);
+        console.log('Profile:', result.profile);
+
+        setSuccess('✓ Login successful! Redirecting to dashboard...');
+
+        // Wait then redirect to dashboard
+        setTimeout(() => {
+          console.log('🔀 Redirecting to dashboard...');
+          // Navigate to dashboard - adjust route based on role
+          const role = result.profile?.role || result.user?.user_metadata?.role || 'user';
+          
+          const ROLE_ROUTES = {
+            'user': '/user/dashboard',
+            'admin': '/admin/dashboard',
+            'moderator': '/moderator/dashboard',
+          };
+          
+          const route = ROLE_ROUTES[role] || '/user/dashboard';
+          navigate(route);
+        }, 2000);
+      } else {
+        console.error('❌ Login failed:', result.error);
+        setError(result.error || 'Login failed. Please try again.');
+        setLoading(false);
+      }
     } catch (err) {
-      setServerError(err.message || 'Invalid email or password');
-    } finally {
+      console.error('❌ Login error:', err);
+      setError(err.message || 'Login failed. Please try again.');
       setLoading(false);
     }
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-indigo-50 via-white to-purple-50 flex items-center justify-center p-4">
-      <div className="w-full max-w-md">
+    <div className="min-h-screen bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center p-4">
+      <div className="w-full max-w-md bg-white rounded-lg shadow-2xl p-8">
+        {/* Header */}
         <div className="text-center mb-8">
-          <div className="inline-flex items-center justify-center w-16 h-16 bg-indigo-600 rounded-2xl mb-4 shadow-lg">
-            <Store className="w-8 h-8 text-white" />
-          </div>
-          <h1 className="text-3xl font-bold text-gray-900">StoreRate</h1>
-          <p className="text-gray-500 mt-1">Sign in to your account</p>
+          <h1 className="text-3xl font-bold text-gray-900 mb-2">Welcome Back</h1>
+          <p className="text-gray-600">Sign in to your account</p>
         </div>
 
-        <div className="bg-white rounded-2xl shadow-xl border border-gray-100 p-8">
-          {serverError && (
-            <div className="mb-5 p-3 rounded-lg bg-red-50 border border-red-200 text-red-700 text-sm">
-              {serverError}
-            </div>
-          )}
+        {/* Success Message */}
+        {success && (
+          <div className="mb-4 p-4 bg-green-50 border border-green-200 rounded-lg">
+            <p className="text-green-700 text-sm font-medium">{success}</p>
+          </div>
+        )}
 
-          <form onSubmit={handleSubmit} noValidate className="space-y-5">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1.5">
-                Email address
-              </label>
-              <input
-                type="email"
-                name="email"
-                value={form.email}
-                onChange={handleChange}
-                placeholder="you@example.com"
-                className={`w-full px-4 py-2.5 rounded-lg border text-sm outline-none transition-all
-                  ${errors.email
-                    ? 'border-red-400 bg-red-50 focus:ring-2 focus:ring-red-300'
-                    : 'border-gray-300 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200'
-                  }`}
-              />
-              {errors.email && <p className="mt-1 text-xs text-red-500">{errors.email}</p>}
-            </div>
+        {/* Error Message */}
+        {error && (
+          <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg">
+            <p className="text-red-700 text-sm font-medium">{error}</p>
+          </div>
+        )}
 
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1.5">
-                Password
-              </label>
-              <div className="relative">
-                <input
-                  type={showPassword ? 'text' : 'password'}
-                  name="password"
-                  value={form.password}
-                  onChange={handleChange}
-                  placeholder="••••••••"
-                  className={`w-full px-4 py-2.5 pr-10 rounded-lg border text-sm outline-none transition-all
-                    ${errors.password
-                      ? 'border-red-400 bg-red-50 focus:ring-2 focus:ring-red-300'
-                      : 'border-gray-300 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200'
-                    }`}
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowPassword((p) => !p)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
-                  tabIndex={-1}
-                >
-                  {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                </button>
-              </div>
-              {errors.password && <p className="mt-1 text-xs text-red-500">{errors.password}</p>}
-            </div>
-
-            <button
-              type="submit"
+        {/* Form */}
+        <form onSubmit={handleSubmit} className="space-y-5">
+          {/* Email Input */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Email Address
+            </label>
+            <input
+              type="email"
+              name="email"
+              value={formData.email}
+              onChange={handleChange}
+              placeholder="you@example.com"
               disabled={loading}
-              className="w-full flex items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-700
-                disabled:opacity-60 text-white font-semibold py-2.5 rounded-lg transition-colors shadow-sm mt-2"
-            >
-              {loading ? (
-                <span className="animate-spin rounded-full h-4 w-4 border-b-2 border-white" />
-              ) : (
-                <LogIn className="w-4 h-4" />
-              )}
-              {loading ? 'Signing in…' : 'Sign In'}
-            </button>
-          </form>
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition disabled:bg-gray-100 disabled:cursor-not-allowed"
+            />
+          </div>
 
-          <p className="mt-6 text-center text-sm text-gray-500">
+          {/* Password Input */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Password
+            </label>
+            <input
+              type="password"
+              name="password"
+              value={formData.password}
+              onChange={handleChange}
+              placeholder="••••••••"
+              disabled={loading}
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition disabled:bg-gray-100 disabled:cursor-not-allowed"
+            />
+          </div>
+
+          {/* Submit Button */}
+          <button
+            type="submit"
+            disabled={loading}
+            className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 text-white font-semibold py-2 rounded-lg transition duration-200 disabled:cursor-not-allowed"
+          >
+            {loading ? (
+              <span className="flex items-center justify-center">
+                <span className="animate-spin inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full mr-2"></span>
+                Signing in...
+              </span>
+            ) : (
+              'Sign In'
+            )}
+          </button>
+        </form>
+
+        {/* Divider */}
+        <div className="my-6 flex items-center">
+          <div className="flex-1 border-t border-gray-300"></div>
+          <span className="px-3 text-gray-500 text-sm">or</span>
+          <div className="flex-1 border-t border-gray-300"></div>
+        </div>
+
+        {/* Sign Up Link */}
+        <div className="text-center">
+          <p className="text-gray-600 text-sm">
             Don't have an account?{' '}
-            <Link to="/signup" className="text-indigo-600 font-medium hover:underline">
-              Create account
+            <Link
+              to="/signup"
+              className="text-blue-600 hover:text-blue-700 font-semibold"
+            >
+              Sign Up
             </Link>
           </p>
         </div>
