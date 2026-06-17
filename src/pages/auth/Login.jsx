@@ -1,4 +1,3 @@
-// src/pages/auth/Login.jsx
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Eye, EyeOff, LogIn, Store } from 'lucide-react';
@@ -51,7 +50,6 @@ export default function Login() {
   return (
     <div className="min-h-screen bg-gradient-to-br from-indigo-50 via-white to-purple-50 flex items-center justify-center p-4">
       <div className="w-full max-w-md">
-        {/* Logo */}
         <div className="text-center mb-8">
           <div className="inline-flex items-center justify-center w-16 h-16 bg-indigo-600 rounded-2xl mb-4 shadow-lg">
             <Store className="w-8 h-8 text-white" />
@@ -60,7 +58,6 @@ export default function Login() {
           <p className="text-gray-500 mt-1">Sign in to your account</p>
         </div>
 
-        {/* Card */}
         <div className="bg-white rounded-2xl shadow-xl border border-gray-100 p-8">
           {serverError && (
             <div className="mb-5 p-3 rounded-lg bg-red-50 border border-red-200 text-red-700 text-sm">
@@ -69,7 +66,6 @@ export default function Login() {
           )}
 
           <form onSubmit={handleSubmit} noValidate className="space-y-5">
-            {/* Email */}
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1.5">
                 Email address
@@ -89,7 +85,6 @@ export default function Login() {
               {errors.email && <p className="mt-1 text-xs text-red-500">{errors.email}</p>}
             </div>
 
-            {/* Password */}
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1.5">
                 Password
@@ -119,7 +114,6 @@ export default function Login() {
               {errors.password && <p className="mt-1 text-xs text-red-500">{errors.password}</p>}
             </div>
 
-            {/* Submit */}
             <button
               type="submit"
               disabled={loading}

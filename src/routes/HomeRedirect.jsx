@@ -1,7 +1,13 @@
-import { Navigate, Outlet } from 'react-router-dom'
+import { Navigate } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 
-export default function RoleBasedRoute({ allowedRoles }) {
+const ROLE_HOME = {
+  admin: '/admin/dashboard',
+  user: '/user/stores',
+  store_owner: '/owner/dashboard',
+}
+
+export default function HomeRedirect() {
   const { user, loading } = useAuth()
 
   if (loading) {
@@ -13,7 +19,6 @@ export default function RoleBasedRoute({ allowedRoles }) {
   }
 
   if (!user) return <Navigate to="/login" replace />
-  if (!allowedRoles.includes(user.role)) return <Navigate to="/unauthorized" replace />
 
-  return <Outlet />
+  return <Navigate to={ROLE_HOME[user.role] || '/login'} replace />
 }

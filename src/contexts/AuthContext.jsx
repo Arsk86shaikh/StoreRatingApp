@@ -1,48 +1,78 @@
-// src/contexts/AuthContext.jsx
-import { createContext, useContext, useState, useEffect } from 'react';
+import { createContext, useContext, useState, useEffect, useCallback } from 'react'
+import { supabase } from '../services/supabase'
 
-export const AuthContext = createContext(null);
+export const AuthContext = createContext(null)
 
 export const AuthProvider = ({ children }) => {
-  const [profile, setProfile] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const [profile, setProfile] = useState(null)
+  const [loading, setLoading] = useState(true)
+
+  const fetchProfile = useCallback(async (userId) => {
+    if (!userId) {
+      setProfile(null)
+      return
+    }
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('*')
+      .eq('id', userId)
+      .single()
+
+    if (error) {
+      // Row may not exist yet for a split second right after signup while the
+      // DB trigger runs — don't treat this as a hard failure.
+      console.warn('Could not fetch profile:', error.message)
+      setProfile(null)
+      return
+    }
+    setProfile(data)
+  }, [])
+
+  const refreshProfile = useCallback(async () => {
+    const { data: { user } } = await supabase.auth.getUser()
+    await fetchProfile(user?.id)
+  }, [fetchProfile])
 
   useEffect(() => {
-    // load existing session/profile on mount, e.g. from localStorage or an API call
-    const stored = localStorage.getItem('profile');
-    if (stored) setProfile(JSON.parse(stored));
-    setLoading(false);
-  }, []);
+    let mounted = true
 
-  const login = async (credentials) => {
-    // replace with your real login call
-    const res = await fetch('/api/login', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(credentials),
-    });
-    const data = await res.json();
-    setProfile(data.profile);
-    localStorage.setItem('profile', JSON.stringify(data.profile));
-    return data;
-  };
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      fetchProfile(session?.user?.id).finally(() => {
+        if (mounted) setLoading(false)
+      })
+    })
+
+    const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
+      fetchProfile(session?.user?.id)
+    })
+
+    return () => {
+      mounted = false
+      listener.subscription.unsubscribe()
+    }
+  }, [fetchProfile])
 
   const logout = async () => {
-    setProfile(null);
-    localStorage.removeItem('profile');
-  };
+    await supabase.auth.signOut()
+    setProfile(null)
+  }
 
-  return (
-    <AuthContext.Provider value={{ profile, login, logout, loading }}>
-      {children}
-    </AuthContext.Provider>
-  );
-};
+  const value = {
+    profile,
+    user: profile, // alias so components/hooks expecting `user` keep working
+    loading,
+    isAuthenticated: !!profile,
+    logout,
+    refreshProfile,
+  }
+
+  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
+}
 
 export const useAuth = () => {
-  const context = useContext(AuthContext);
-  if (!context) {
-    throw new Error('useAuth must be used within an AuthProvider');
-  }
-  return context;
-};
+  const context = useContext(AuthContext)
+  if (!context) throw new Error('useAuth must be used within an AuthProvider')
+  return context
+}
+
+export default useAuth

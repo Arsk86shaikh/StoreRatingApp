@@ -1,4 +1,3 @@
-// src/pages/auth/Signup.jsx
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Eye, EyeOff, UserPlus, Store } from 'lucide-react';
@@ -96,27 +95,6 @@ export default function Signup() {
     );
   }
 
-  const Field = ({ label, name, type = 'text', placeholder, children }) => (
-    <div>
-      <label className="block text-sm font-medium text-gray-700 mb-1.5">{label}</label>
-      {children || (
-        <input
-          type={type}
-          name={name}
-          value={form[name]}
-          onChange={handleChange}
-          placeholder={placeholder}
-          className={`w-full px-4 py-2.5 rounded-lg border text-sm outline-none transition-all
-            ${errors[name]
-              ? 'border-red-400 bg-red-50 focus:ring-2 focus:ring-red-300'
-              : 'border-gray-300 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200'
-            }`}
-        />
-      )}
-      {errors[name] && <p className="mt-1 text-xs text-red-500">{errors[name]}</p>}
-    </div>
-  );
-
   const pwdInputClass = (name) =>
     `w-full px-4 py-2.5 pr-10 rounded-lg border text-sm outline-none transition-all ${
       errors[name]
@@ -127,7 +105,6 @@ export default function Signup() {
   return (
     <div className="min-h-screen bg-gradient-to-br from-indigo-50 via-white to-purple-50 flex items-center justify-center p-4 py-8">
       <div className="w-full max-w-md">
-        {/* Logo */}
         <div className="text-center mb-8">
           <div className="inline-flex items-center justify-center w-16 h-16 bg-indigo-600 rounded-2xl mb-4 shadow-lg">
             <Store className="w-8 h-8 text-white" />
@@ -136,7 +113,6 @@ export default function Signup() {
           <p className="text-gray-500 mt-1">Create your free account</p>
         </div>
 
-        {/* Card */}
         <div className="bg-white rounded-2xl shadow-xl border border-gray-100 p-8">
           {serverError && (
             <div className="mb-5 p-3 rounded-lg bg-red-50 border border-red-200 text-red-700 text-sm">
@@ -145,7 +121,6 @@ export default function Signup() {
           )}
 
           <form onSubmit={handleSubmit} noValidate className="space-y-5">
-            {/* Full name */}
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1.5">Full Name</label>
               <input
@@ -165,7 +140,6 @@ export default function Signup() {
               </div>
             </div>
 
-            {/* Email */}
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1.5">Email address</label>
               <input
@@ -180,7 +154,6 @@ export default function Signup() {
               {errors.email && <p className="mt-1 text-xs text-red-500">{errors.email}</p>}
             </div>
 
-            {/* Address */}
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1.5">Address</label>
               <textarea
@@ -195,7 +168,6 @@ export default function Signup() {
               {errors.address && <p className="mt-1 text-xs text-red-500">{errors.address}</p>}
             </div>
 
-            {/* Password */}
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1.5">Password</label>
               <div className="relative">
@@ -215,7 +187,6 @@ export default function Signup() {
               {errors.password && <p className="mt-1 text-xs text-red-500">{errors.password}</p>}
             </div>
 
-            {/* Confirm Password */}
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1.5">Confirm Password</label>
               <div className="relative">
@@ -235,7 +206,6 @@ export default function Signup() {
               {errors.confirmPassword && <p className="mt-1 text-xs text-red-500">{errors.confirmPassword}</p>}
             </div>
 
-            {/* Submit */}
             <button
               type="submit"
               disabled={loading}
