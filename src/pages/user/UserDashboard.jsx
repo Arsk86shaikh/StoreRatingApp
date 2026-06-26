@@ -1,14 +1,15 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useAuth } from '../../contexts/AuthContext';
+import { supabase } from '../../services/supabase';
 import StatsCard from '../../components/dashboard/StatsCard';
 import UserRatingsTable from '../../components/dashboard/UserRatingsTable';
 import StoreList from '../../components/store/StoreList';
-import { useAuth } from '../../contexts/AuthContext';
-import { supabase } from '../../services/supabase';
 
 export default function UserDashboard() {
   const navigate = useNavigate();
-  const { profile, loading: authLoading, user } = useAuth();
+  const { profile, user, loading: authLoading, isAuthenticated } = useAuth();
+
   const [stores, setStores] = useState([]);
   const [userRatings, setUserRatings] = useState([]);
   const [stats, setStats] = useState({
@@ -19,51 +20,38 @@ export default function UserDashboard() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
-  console.log('🔍 UserDashboard Debug:', {
-    authLoading,
-    profile,
-    user,
-    profileId: profile?.id,
-  });
-
-  // Check if user is logged in and has permission
+  // BUG 9 FIX: only redirect after auth has finished loading AND we have
+  // confirmed there is no session at all. Redirecting on !user alone would
+  // fire during the brief window where user is null but auth is still loading.
   useEffect(() => {
-    if (!authLoading && !user) {
-      console.warn('❌ No user found, redirecting to login');
+    if (!authLoading && !isAuthenticated) {
       navigate('/login', { replace: true });
     }
-  }, [authLoading, user, navigate]);
+  }, [authLoading, isAuthenticated, navigate]);
 
-  // Fetch dashboard data when profile is ready
-  useEffect(() => {
-    if (!authLoading && profile?.id) {
-      console.log('📊 Starting dashboard data fetch for user:', profile.id);
-      fetchDashboardData();
-    }
-  }, [profile?.id, authLoading]);
+  // BUG 4 FIX: wrap in useCallback so the function reference is stable.
+  // Passing it as a dep to useEffect is now safe — won't cause infinite loops.
+  const fetchDashboardData = useCallback(async () => {
+    if (!profile?.id) return;
 
-  const fetchDashboardData = async () => {
     try {
       setLoading(true);
       setError(null);
-      console.log('⏳ Fetching dashboard data...');
 
-      // Fetch all stores
-      console.log('📦 Fetching stores...');
+      // BUG 1 FIX: removed `category` and `phone` — those columns do not exist
+      // in the schema. Only select columns that actually exist in public.stores.
+      // BUG 8 FIX: query stores_with_rating view (created in schema) instead of
+      // the raw stores table so avg_rating and total_ratings come back already
+      // computed — StoreList can display per-store ratings without extra queries.
       const { data: storesData, error: storesError } = await supabase
-        .from('stores')
-        .select('id, name, address, category, phone, email')
+        .from('stores_with_rating')
+        .select('id, name, email, address, avg_rating, total_ratings')
         .order('name', { ascending: true });
 
-      if (storesError) {
-        console.error('❌ Stores fetch error:', storesError);
-        throw storesError;
-      }
-      console.log('✅ Stores fetched:', storesData?.length || 0);
+      if (storesError) throw storesError;
       setStores(storesData || []);
 
-      // Fetch user's ratings with store details
-      console.log('⭐ Fetching user ratings for user:', profile.id);
+      // Fetch this user's ratings joined with store name/address for the table
       const { data: ratingsData, error: ratingsError } = await supabase
         .from('ratings')
         .select(`
@@ -80,133 +68,113 @@ export default function UserDashboard() {
         .eq('user_id', profile.id)
         .order('created_at', { ascending: false });
 
-      if (ratingsError) {
-        console.error('❌ Ratings fetch error:', ratingsError);
-        throw ratingsError;
-      }
-      console.log('✅ Ratings fetched:', ratingsData?.length || 0);
+      if (ratingsError) throw ratingsError;
 
       const ratings = ratingsData || [];
       setUserRatings(ratings);
 
-      // Calculate statistics
+      // Stats: calculate from fetched data
       const avgRating =
         ratings.length > 0
-          ? (ratings.reduce((sum, r) => sum + (r.rating || 0), 0) / ratings.length).toFixed(1)
+          ? ratings.reduce((sum, r) => sum + (r.rating || 0), 0) / ratings.length
           : 0;
 
-      const calculatedStats = {
+      setStats({
         totalStores: storesData?.length || 0,
         totalRatingsSubmitted: ratings.length,
-        averageRating: parseFloat(avgRating) || 0,
-      };
-
-      console.log('📈 Calculated stats:', calculatedStats);
-      setStats(calculatedStats);
+        // BUG 10 FIX: store as number here; format only at render time (once)
+        averageRating: avgRating,
+      });
     } catch (err) {
-      console.error('❌ Dashboard fetch error:', err);
       setError(err.message || 'Failed to load dashboard data. Please refresh the page.');
     } finally {
       setLoading(false);
     }
-  };
+  }, [profile?.id]);
 
-  const handleRatingSubmit = async (data) => {
+  useEffect(() => {
+    if (!authLoading && profile?.id) {
+      fetchDashboardData();
+    }
+  }, [authLoading, profile?.id, fetchDashboardData]);
+
+  const handleRatingSubmit = async ({ storeId, rating }) => {
     try {
-      console.log('💾 Submitting rating:', data);
-      const existingRating = userRatings.find((r) => r.store_id === data.storeId);
+      const existingRating = userRatings.find((r) => r.store_id === storeId);
 
       if (existingRating) {
-        console.log('🔄 Updating existing rating:', existingRating.id);
-        // Update existing rating
+        // BUG 6+7 FIX: don't set updated_at manually — the DB trigger
+        // (trg_ratings_updated_at) handles this server-side, consistently.
         const { error } = await supabase
           .from('ratings')
-          .update({ rating: data.rating, updated_at: new Date().toISOString() })
+          .update({ rating })
           .eq('id', existingRating.id);
 
         if (error) throw error;
       } else {
-        console.log('✨ Creating new rating');
-        // Insert new rating
-        const { error } = await supabase.from('ratings').insert([
-          {
-            store_id: data.storeId,
-            user_id: profile.id,
-            rating: data.rating,
-            created_at: new Date().toISOString(),
-          },
-        ]);
+        // BUG 6+7 FIX: don't set created_at manually either — let the DB default.
+        const { error } = await supabase
+          .from('ratings')
+          .insert([{ store_id: storeId, user_id: profile.id, rating }]);
 
         if (error) throw error;
       }
 
-      console.log('✅ Rating submitted successfully');
-      // Refresh dashboard
+      // Refresh all data so stats, ratings table, and store list stay in sync
       await fetchDashboardData();
     } catch (err) {
-      console.error('❌ Rating submit error:', err);
       setError('Failed to submit rating. Please try again.');
       throw err;
     }
   };
 
-  // Loading state
-  if (authLoading || loading) {
+  // BUG 2+3 FIX: removed min-h-screen from loading/error states.
+  // This page renders inside DashboardLayout's <main> which already controls
+  // height — min-h-screen would push content outside the layout bounds.
+  if (authLoading || (loading && !stores.length)) {
     return (
-      <div className="flex justify-center items-center min-h-screen bg-gray-50">
-        <div className="text-center">
-          <div className="inline-flex items-center justify-center w-16 h-16 mb-4">
-            <div className="w-12 h-12 rounded-full border-4 border-indigo-200 border-t-indigo-600 animate-spin"></div>
-          </div>
-          <p className="text-gray-600 font-medium">Loading your dashboard...</p>
-          <p className="text-gray-500 text-sm mt-2">Please wait while we fetch your data</p>
-        </div>
+      <div className="flex flex-col items-center justify-center py-24 gap-4">
+        <div className="w-12 h-12 rounded-full border-4 border-indigo-200 border-t-indigo-600 animate-spin" />
+        <p className="text-gray-500 font-medium">Loading your dashboard…</p>
       </div>
     );
   }
 
-  // Error state
   if (error) {
     return (
-      <div className="flex justify-center items-center min-h-screen bg-gray-50">
-        <div className="bg-white rounded-lg shadow-lg p-8 max-w-md text-center">
-          <div className="text-red-600 text-4xl mb-4">⚠️</div>
-          <h2 className="text-2xl font-bold text-gray-900 mb-2">Oops!</h2>
-          <p className="text-gray-600 mb-6">{error}</p>
-          <button
-            onClick={() => {
-              setError(null);
-              fetchDashboardData();
-            }}
-            className="px-6 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition font-medium"
-          >
-            Try Again
-          </button>
-        </div>
+      <div className="flex flex-col items-center justify-center py-24 gap-4 text-center">
+        <div className="text-4xl">⚠️</div>
+        <h2 className="text-xl font-bold text-gray-900">Something went wrong</h2>
+        <p className="text-gray-500 max-w-sm">{error}</p>
+        <button
+          onClick={() => { setError(null); fetchDashboardData(); }}
+          className="px-6 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition font-medium"
+        >
+          Try Again
+        </button>
       </div>
     );
   }
 
-  // Create rating map for quick lookups
-  const userRatingMap = {};
-  userRatings.forEach((r) => {
-    userRatingMap[r.store_id] = r.rating;
-  });
+  // Build rating map for O(1) lookup in StoreList
+  const userRatingMap = Object.fromEntries(
+    userRatings.map((r) => [r.store_id, r.rating])
+  );
 
   return (
     <div className="space-y-6 pb-8">
-      {/* Welcome Header */}
-      <div className="bg-gradient-to-r from-indigo-600 to-blue-600 rounded-lg shadow-lg p-8 text-white">
-        <h1 className="text-4xl font-bold mb-2">
-          Welcome, {profile?.full_name || 'User'}! 👋
+      {/* Welcome banner */}
+      <div className="bg-gradient-to-r from-indigo-600 to-blue-600 rounded-xl p-6 text-white shadow-md">
+        <h1 className="text-2xl font-bold mb-1">
+          Welcome back, {profile?.full_name?.split(' ')[0] || 'there'}! 👋
         </h1>
-        <p className="text-indigo-100">
-          Rate your favorite stores and help others find the best places in town
+        <p className="text-indigo-100 text-sm">
+          Rate your favourite stores and help others find the best places.
         </p>
       </div>
 
-      {/* Stats Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+      {/* Stats */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <StatsCard
           title="Total Stores"
           value={stats.totalStores}
@@ -222,33 +190,33 @@ export default function UserDashboard() {
           subtitle="Your contributions"
         />
         <StatsCard
-          title="Your Average Rating"
-          value={stats.averageRating.toFixed(1)}
+          title="Your Avg Rating"
+          value={stats.averageRating > 0 ? stats.averageRating.toFixed(1) : '—'}
           icon="📊"
           color="green"
           subtitle="Out of 5.0"
         />
       </div>
 
-      {/* Your Ratings Section */}
+      {/* Ratings you've submitted */}
       {userRatings.length > 0 && (
-        <div className="bg-white rounded-lg shadow-md p-6">
+        <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
           <div className="flex items-center justify-between mb-4">
-            <h2 className="text-2xl font-bold text-gray-900">Your Ratings</h2>
-            <span className="bg-indigo-100 text-indigo-600 px-3 py-1 rounded-full text-sm font-medium">
-              {userRatings.length} ratings
+            <h2 className="text-lg font-semibold text-gray-900">Your Ratings</h2>
+            <span className="bg-indigo-50 text-indigo-600 px-3 py-1 rounded-full text-sm font-medium">
+              {userRatings.length} {userRatings.length === 1 ? 'rating' : 'ratings'}
             </span>
           </div>
           <UserRatingsTable ratings={userRatings} />
         </div>
       )}
 
-      {/* Browse All Stores Section */}
-      <div className="bg-white rounded-lg shadow-md p-6">
-        <div className="flex items-center justify-between mb-6">
-          <h2 className="text-2xl font-bold text-gray-900">Browse All Stores</h2>
-          <span className="bg-blue-100 text-blue-600 px-3 py-1 rounded-full text-sm font-medium">
-            {stores.length} stores
+      {/* All stores */}
+      <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-lg font-semibold text-gray-900">Browse All Stores</h2>
+          <span className="bg-blue-50 text-blue-600 px-3 py-1 rounded-full text-sm font-medium">
+            {stores.length} {stores.length === 1 ? 'store' : 'stores'}
           </span>
         </div>
 
@@ -259,9 +227,9 @@ export default function UserDashboard() {
             onRatingSubmit={handleRatingSubmit}
           />
         ) : (
-          <div className="text-center py-8">
-            <p className="text-gray-500 text-lg">📭 No stores available at the moment</p>
-            <p className="text-gray-400 text-sm mt-2">Check back later for new stores</p>
+          <div className="text-center py-12">
+            <p className="text-gray-400 text-lg">📭 No stores available yet</p>
+            <p className="text-gray-400 text-sm mt-1">Check back later for new stores</p>
           </div>
         )}
       </div>

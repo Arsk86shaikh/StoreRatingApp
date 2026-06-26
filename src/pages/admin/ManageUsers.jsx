@@ -1,213 +1,340 @@
-import { useState, useEffect } from 'react';
+// src/pages/admin/ManageUsers.jsx
+import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import SearchFilter from '../../components/common/SearchFilter';
-import Table from '../../components/common/Table';
 import { supabase } from '../../services/supabase';
+import { AlertCircle, UserPlus, X, Eye, ChevronUp, ChevronDown, RefreshCw } from 'lucide-react';
+
+const ROLE_BADGE = {
+  admin:       'bg-red-100 text-red-700',
+  store_owner: 'bg-purple-100 text-purple-700',
+  user:        'bg-blue-100 text-blue-700',
+};
+
+const ROLE_LABEL = {
+  admin:       'Administrator',
+  store_owner: 'Store Owner',
+  user:        'Normal User',
+};
+
+const EMPTY_FORM = {
+  full_name: '',
+  email: '',
+  address: '',
+  password: '',
+  role: 'user',
+};
 
 export default function ManageUsers() {
   const navigate = useNavigate();
-  const [users, setUsers] = useState([]);
-  const [filteredUsers, setFilteredUsers] = useState([]);
-  const [searchTerm, setSearchTerm] = useState('');
-  const [filterRole, setFilterRole] = useState('all');
-  const [loading, setLoading] = useState(true);
-  const [showModal, setShowModal] = useState(false);
-  const [newUser, setNewUser] = useState({
-    name: '',
-    email: '',
-    address: '',
-    password: '',
-    role: 'user',
-  });
-  const [error, setError] = useState('');
+  const [users,       setUsers]       = useState([]);
+  const [search,      setSearch]      = useState('');
+  const [filterRole,  setFilterRole]  = useState('all');
+  const [sortKey,     setSortKey]     = useState('full_name');
+  const [sortAsc,     setSortAsc]     = useState(true);
+  const [loading,     setLoading]     = useState(true);
+  const [showModal,   setShowModal]   = useState(false);
+  const [form,        setForm]        = useState(EMPTY_FORM);
+  const [formErrors,  setFormErrors]  = useState({});
+  const [serverError, setServerError] = useState('');
+  const [saving,      setSaving]      = useState(false);
+  const [successMsg,  setSuccessMsg]  = useState('');
 
-  useEffect(() => {
-    fetchUsers();
+  // ── Fetch ──────────────────────────────────────────────────
+  const fetchUsers = useCallback(async () => {
+    setLoading(true);
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('id, full_name, email, address, role, created_at, updated_at')
+      .order('created_at', { ascending: false });
+
+    if (error) console.error('fetchUsers:', error.message);
+    setUsers(data || []);
+    setLoading(false);
   }, []);
 
-  useEffect(() => {
-    filterUsers();
-  }, [users, searchTerm, filterRole]);
+  useEffect(() => { fetchUsers(); }, [fetchUsers]);
 
-  const fetchUsers = async () => {
-    try {
-      setLoading(true);
-      const { data, error: fetchError } = await supabase
-        .from('users')
-        .select('*')
-        .order('created_at', { ascending: false });
+  // ── Derived list (filter + sort, no extra fetch) ──────────
+  const displayed = users
+    .filter((u) => {
+      const term = search.toLowerCase();
+      const matchSearch = !term ||
+        u.full_name?.toLowerCase().includes(term) ||
+        u.email?.toLowerCase().includes(term) ||
+        u.address?.toLowerCase().includes(term);
+      const matchRole = filterRole === 'all' || u.role === filterRole;
+      return matchSearch && matchRole;
+    })
+    .sort((a, b) => {
+      const av = (a[sortKey] || '').toString().toLowerCase();
+      const bv = (b[sortKey] || '').toString().toLowerCase();
+      if (av < bv) return sortAsc ? -1 : 1;
+      if (av > bv) return sortAsc ? 1 : -1;
+      return 0;
+    });
 
-      if (fetchError) throw fetchError;
-      setUsers(data || []);
-    } catch (error) {
-      console.error('Error fetching users:', error);
-    } finally {
-      setLoading(false);
-    }
+  const toggleSort = (key) => {
+    if (sortKey === key) setSortAsc((p) => !p);
+    else { setSortKey(key); setSortAsc(true); }
   };
 
-  const filterUsers = () => {
-    let filtered = users;
+  const SortIcon = ({ col }) =>
+    sortKey !== col ? null : sortAsc
+      ? <ChevronUp   className="w-3 h-3 inline ml-1" />
+      : <ChevronDown className="w-3 h-3 inline ml-1" />;
 
-    if (searchTerm) {
-      const term = searchTerm.toLowerCase();
-      filtered = filtered.filter(
-        (user) =>
-          user.name.toLowerCase().includes(term) ||
-          user.email.toLowerCase().includes(term) ||
-          user.address.toLowerCase().includes(term)
-      );
-    }
-
-    if (filterRole !== 'all') {
-      filtered = filtered.filter((user) => user.role === filterRole);
-    }
-
-    setFilteredUsers(filtered);
+  // ── Form helpers ───────────────────────────────────────────
+  const handleChange = (e) => {
+    const { name, value } = e.target;
+    setForm((p) => ({ ...p, [name]: value }));
+    setFormErrors((p) => ({ ...p, [name]: '' }));
+    setServerError('');
   };
 
+  const validate = () => {
+    const errs = {};
+    const name = form.full_name.trim();
+    if (!name)               errs.full_name = 'Name is required';
+    else if (name.length < 20) errs.full_name = 'Name must be at least 20 characters';
+    else if (name.length > 60) errs.full_name = 'Name must be at most 60 characters';
+
+    if (!form.email)
+      errs.email = 'Email is required';
+    else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email))
+      errs.email = 'Invalid email address';
+
+    const addr = form.address.trim();
+    if (!addr)               errs.address = 'Address is required';
+    else if (addr.length > 400) errs.address = 'Address max 400 characters';
+
+    if (!form.password)           errs.password = 'Password is required';
+    else if (form.password.length < 8)  errs.password = 'Min 8 characters';
+    else if (form.password.length > 16) errs.password = 'Max 16 characters';
+    else if (!/[A-Z]/.test(form.password))              errs.password = 'Needs one uppercase letter';
+    else if (!/[!@#$%^&*(),.?":{}|<>]/.test(form.password)) errs.password = 'Needs one special character';
+
+    return errs;
+  };
+
+  // ── Add user ───────────────────────────────────────────────
   const handleAddUser = async (e) => {
     e.preventDefault();
-    setError('');
+    const errs = validate();
+    if (Object.keys(errs).length) { setFormErrors(errs); return; }
 
-    // Validation
-    if (!newUser.name.trim() || newUser.name.length < 3) {
-      setError('Name must be at least 3 characters');
-      return;
-    }
-    if (!newUser.email.includes('@')) {
-      setError('Invalid email format');
-      return;
-    }
-    if (!newUser.address.trim()) {
-      setError('Address is required');
-      return;
-    }
+    setSaving(true);
+    setServerError('');
 
     try {
-      // First, sign up with Supabase Auth
-      const { data: authData, error: authError } = await supabase.auth.signUp({
-        email: newUser.email,
-        password: newUser.password,
-      });
+      // 1. Save admin session BEFORE creating the new user
+      const { data: { session: adminSession } } = await supabase.auth.getSession();
+      if (!adminSession) throw new Error('Admin session lost — please refresh and try again.');
 
-      if (authError) throw authError;
-
-      // Then create user record
-      const { error: insertError } = await supabase.from('users').insert([
-        {
-          id: authData.user.id,
-          email: newUser.email,
-          name: newUser.name,
-          address: newUser.address,
-          role: newUser.role,
+      // 2. Create the new auth user
+      const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
+        email: form.email,
+        password: form.password,
+        options: {
+          data: {
+            full_name: form.full_name.trim(),
+            address:   form.address.trim(),
+            role:      form.role,
+          },
         },
-      ]);
-
-      if (insertError) throw insertError;
-
-      setShowModal(false);
-      setNewUser({
-        name: '',
-        email: '',
-        address: '',
-        password: '',
-        role: 'user',
       });
-      await fetchUsers();
-    } catch (error) {
-      setError(error.message || 'Failed to add user');
+
+      if (signUpError) throw signUpError;
+      if (!signUpData.user) throw new Error('User creation failed — email may already be in use.');
+
+      const newUserId = signUpData.user.id;
+
+      // 3. Sign out the newly-created session immediately, then restore admin
+      await supabase.auth.signOut();
+      await supabase.auth.setSession({
+        access_token:  adminSession.access_token,
+        refresh_token: adminSession.refresh_token,
+      });
+
+      // 4. Upsert the profile row directly — don't rely solely on the trigger.
+      //    This guarantees the row exists even if:
+      //      a) the trigger hasn't committed yet
+      //      b) the trigger was never installed
+      const { error: upsertError } = await supabase
+        .from('profiles')
+        .upsert({
+          id:        newUserId,
+          full_name: form.full_name.trim(),
+          email:     form.email.trim().toLowerCase(),
+          address:   form.address.trim(),
+          role:      form.role,
+        }, { onConflict: 'id' });
+
+      if (upsertError) {
+        // Not fatal — the trigger may have already created the row.
+        console.warn('Profile upsert warning:', upsertError.message);
+      }
+
+      // 5. Add the new user directly to local state so it appears instantly
+      //    without needing a full refetch (avoids the trigger-timing race).
+      setUsers((prev) => [{
+        id:         newUserId,
+        full_name:  form.full_name.trim(),
+        email:      form.email.trim().toLowerCase(),
+        address:    form.address.trim(),
+        role:       form.role,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      }, ...prev]);
+
+      setSuccessMsg(`User "${form.full_name.trim()}" added successfully.`);
+      setTimeout(() => setSuccessMsg(''), 4000);
+      closeModal();
+
+    } catch (err) {
+      // If something went wrong after signOut, try to restore admin anyway
+      try {
+        const { data: { session: adminSession } } = await supabase.auth.getSession();
+        if (!adminSession) {
+          const stored = localStorage.getItem('sb-session');
+          if (stored) await supabase.auth.setSession(JSON.parse(stored));
+        }
+      } catch (_) { /* best effort */ }
+
+      setServerError(err.message || 'Failed to add user. Try again.');
+    } finally {
+      setSaving(false);
     }
   };
 
-  if (loading) {
-    return (
-      <div className="flex justify-center items-center h-96">
-        <div className="h-12 w-12 rounded-full border-4 border-indigo-600 border-t-transparent animate-spin"></div>
-      </div>
-    );
-  }
+  const closeModal = () => {
+    setShowModal(false);
+    setForm(EMPTY_FORM);
+    setFormErrors({});
+    setServerError('');
+  };
+
+  const inputCls = (name) =>
+    `w-full px-3 py-2 rounded-lg border text-sm outline-none transition-all
+    ${formErrors[name]
+      ? 'border-red-300 bg-red-50 focus:ring-2 focus:ring-red-200'
+      : 'border-gray-200 focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100'}`;
+
+  // ── Render ─────────────────────────────────────────────────
+  if (loading) return (
+    <div className="flex justify-center items-center h-96">
+      <span className="h-10 w-10 rounded-full border-4 border-indigo-600 border-t-transparent animate-spin" />
+    </div>
+  );
 
   return (
     <div className="space-y-6">
-      <div className="flex justify-between items-center">
+      {/* Header */}
+      <div className="flex justify-between items-start">
         <div>
-          <h1 className="text-3xl font-bold text-gray-900">Manage Users</h1>
-          <p className="text-gray-600 mt-1">Add and manage user accounts</p>
+          <h1 className="text-2xl font-bold text-gray-900">Manage Users</h1>
+          <p className="text-gray-500 text-sm mt-1">{users.length} total users</p>
         </div>
-        <button
-          onClick={() => setShowModal(true)}
-          className="bg-indigo-600 text-white px-6 py-2 rounded-lg hover:bg-indigo-700 transition"
-        >
-          + Add New User
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={fetchUsers}
+            title="Refresh list"
+            className="p-2 rounded-lg border border-gray-200 text-gray-500 hover:text-indigo-600 hover:border-indigo-300 transition"
+          >
+            <RefreshCw className="w-4 h-4" />
+          </button>
+          <button
+            onClick={() => setShowModal(true)}
+            className="flex items-center gap-2 bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 transition text-sm font-medium"
+          >
+            <UserPlus className="w-4 h-4" /> Add User
+          </button>
+        </div>
       </div>
 
+      {/* Success toast */}
+      {successMsg && (
+        <div className="flex items-center gap-2 p-3.5 bg-green-50 border border-green-200 text-green-700 rounded-xl text-sm">
+          <span className="text-green-500">✓</span> {successMsg}
+        </div>
+      )}
+
       {/* Filters */}
-      <div className="bg-white rounded-lg shadow-md p-4 space-y-4">
+      <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              Search
-            </label>
-            <SearchFilter
-              value={searchTerm}
-              onChange={setSearchTerm}
-              placeholder="Search by name, email, or address..."
+            <label className="block text-xs font-medium text-gray-500 mb-1.5 uppercase tracking-wide">Search</label>
+            <input
+              type="text"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Name, email or address…"
+              className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm outline-none focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400"
             />
           </div>
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              Filter by Role
-            </label>
+            <label className="block text-xs font-medium text-gray-500 mb-1.5 uppercase tracking-wide">Role</label>
             <select
               value={filterRole}
               onChange={(e) => setFilterRole(e.target.value)}
-              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
+              className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm outline-none focus:ring-2 focus:ring-indigo-200"
             >
               <option value="all">All Roles</option>
               <option value="user">Normal User</option>
               <option value="store_owner">Store Owner</option>
-              <option value="admin">Admin</option>
+              <option value="admin">Administrator</option>
             </select>
           </div>
         </div>
       </div>
 
-      {/* Users Table */}
-      <div className="bg-white rounded-lg shadow-md overflow-hidden">
+      {/* Table */}
+      <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="w-full">
-            <thead className="bg-gray-50 border-b border-gray-200">
+          <table className="w-full text-sm">
+            <thead className="bg-gray-50 border-b border-gray-100">
               <tr>
-                <th className="px-6 py-3 text-left text-sm font-medium text-gray-700">Name</th>
-                <th className="px-6 py-3 text-left text-sm font-medium text-gray-700">Email</th>
-                <th className="px-6 py-3 text-left text-sm font-medium text-gray-700">Address</th>
-                <th className="px-6 py-3 text-left text-sm font-medium text-gray-700">Role</th>
-                <th className="px-6 py-3 text-left text-sm font-medium text-gray-700">Action</th>
+                {[
+                  { key: 'full_name', label: 'Name' },
+                  { key: 'email',     label: 'Email' },
+                  { key: 'address',   label: 'Address' },
+                  { key: 'role',      label: 'Role' },
+                ].map(({ key, label }) => (
+                  <th
+                    key={key}
+                    onClick={() => toggleSort(key)}
+                    className="px-5 py-3 text-left font-semibold text-gray-600 cursor-pointer select-none hover:text-gray-900"
+                  >
+                    {label}<SortIcon col={key} />
+                  </th>
+                ))}
+                <th className="px-5 py-3 text-left font-semibold text-gray-600">Action</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-gray-200">
-              {filteredUsers.map((user) => (
-                <tr key={user.id} className="hover:bg-gray-50">
-                  <td className="px-6 py-4 text-sm font-medium text-gray-900">{user.name}</td>
-                  <td className="px-6 py-4 text-sm text-gray-600">{user.email}</td>
-                  <td className="px-6 py-4 text-sm text-gray-600">{user.address}</td>
-                  <td className="px-6 py-4 text-sm">
-                    <span className={`inline-flex px-3 py-1 text-xs font-medium rounded-full ${
-                      user.role === 'admin' ? 'bg-red-100 text-red-700' :
-                      user.role === 'store_owner' ? 'bg-purple-100 text-purple-700' :
-                      'bg-blue-100 text-blue-700'
-                    }`}>
-                      {user.role === 'store_owner' ? 'Store Owner' : user.role.charAt(0).toUpperCase() + user.role.slice(1)}
+            <tbody className="divide-y divide-gray-50">
+              {displayed.length === 0 ? (
+                <tr>
+                  <td colSpan={5} className="px-5 py-12 text-center text-gray-400">
+                    {search || filterRole !== 'all' ? 'No users match your filters.' : 'No users yet.'}
+                  </td>
+                </tr>
+              ) : displayed.map((u) => (
+                <tr key={u.id} className="hover:bg-gray-50 transition-colors">
+                  <td className="px-5 py-3.5 font-medium text-gray-900">{u.full_name}</td>
+                  <td className="px-5 py-3.5 text-gray-600">{u.email}</td>
+                  <td className="px-5 py-3.5 text-gray-500 max-w-[180px] truncate" title={u.address}>
+                    {u.address}
+                  </td>
+                  <td className="px-5 py-3.5">
+                    <span className={`inline-flex px-2.5 py-0.5 text-xs font-semibold rounded-full ${ROLE_BADGE[u.role] || 'bg-gray-100 text-gray-600'}`}>
+                      {ROLE_LABEL[u.role] || u.role}
                     </span>
                   </td>
-                  <td className="px-6 py-4 text-sm">
+                  <td className="px-5 py-3.5">
                     <button
-                      onClick={() => navigate(`/admin/users/${user.id}`)}
-                      className="text-indigo-600 hover:text-indigo-900 font-medium"
+                      onClick={() => navigate(`/admin/users/${u.id}`)}
+                      className="inline-flex items-center gap-1 text-indigo-600 hover:text-indigo-800 font-medium text-xs"
                     >
-                      View Details
+                      <Eye className="w-3.5 h-3.5" /> View
                     </button>
                   </td>
                 </tr>
@@ -215,99 +342,140 @@ export default function ManageUsers() {
             </tbody>
           </table>
         </div>
+
+        {/* Footer count */}
+        {displayed.length > 0 && (
+          <div className="px-5 py-2.5 border-t border-gray-50 text-xs text-gray-400">
+            Showing {displayed.length} of {users.length} users
+          </div>
+        )}
       </div>
 
       {/* Add User Modal */}
       {showModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-lg p-6 w-full max-w-md">
-            <h2 className="text-2xl font-bold text-gray-900 mb-4">Add New User</h2>
+          <div className="bg-white rounded-2xl w-full max-w-md shadow-2xl max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 sticky top-0 bg-white rounded-t-2xl z-10">
+              <h2 className="text-lg font-bold text-gray-900">Add New User</h2>
+              <button onClick={closeModal} className="text-gray-400 hover:text-gray-600 transition">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
 
-            {error && (
-              <div className="p-3 bg-red-100 border border-red-400 text-red-700 rounded mb-4">
-                {error}
-              </div>
-            )}
+            <form onSubmit={handleAddUser} noValidate className="p-6 space-y-4">
+              {serverError && (
+                <div className="flex items-start gap-2 p-3 rounded-lg bg-red-50 border border-red-100 text-red-700 text-sm">
+                  <AlertCircle className="w-4 h-4 mt-0.5 flex-shrink-0" />
+                  <span>{serverError}</span>
+                </div>
+              )}
 
-            <form onSubmit={handleAddUser} className="space-y-4">
+              {/* Full Name */}
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Name
-                </label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Full Name</label>
                 <input
-                  type="text"
-                  value={newUser.name}
-                  onChange={(e) => setNewUser({ ...newUser, name: e.target.value })}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
-                  placeholder="Enter name"
+                  name="full_name"
+                  value={form.full_name}
+                  onChange={handleChange}
+                  placeholder="Min 20 characters"
+                  className={inputCls('full_name')}
                 />
+                <div className="flex justify-between mt-1">
+                  <span>{formErrors.full_name && <p className="text-xs text-red-500">{formErrors.full_name}</p>}</span>
+                  <p className={`text-xs ml-auto ${form.full_name.length > 60 ? 'text-red-500' : 'text-gray-400'}`}>
+                    {form.full_name.length}/60
+                  </p>
+                </div>
               </div>
 
+              {/* Email */}
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Email
-                </label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Email</label>
                 <input
+                  name="email"
                   type="email"
-                  value={newUser.email}
-                  onChange={(e) => setNewUser({ ...newUser, email: e.target.value })}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
-                  placeholder="Enter email"
+                  value={form.email}
+                  onChange={handleChange}
+                  placeholder="user@example.com"
+                  className={inputCls('email')}
                 />
+                {formErrors.email && <p className="mt-1 text-xs text-red-500">{formErrors.email}</p>}
               </div>
 
+              {/* Address */}
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Address
-                </label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Address</label>
                 <textarea
-                  value={newUser.address}
-                  onChange={(e) => setNewUser({ ...newUser, address: e.target.value })}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
-                  placeholder="Enter address"
-                  rows="3"
+                  name="address"
+                  value={form.address}
+                  onChange={handleChange}
+                  rows={2}
+                  placeholder="Full address"
+                  className={`${inputCls('address')} resize-none`}
                 />
+                <div className="flex justify-between mt-1">
+                  <span>{formErrors.address && <p className="text-xs text-red-500">{formErrors.address}</p>}</span>
+                  <p className={`text-xs ml-auto ${form.address.length > 400 ? 'text-red-500' : 'text-gray-400'}`}>
+                    {form.address.length}/400
+                  </p>
+                </div>
               </div>
 
+              {/* Password */}
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Password
-                </label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Password</label>
                 <input
+                  name="password"
                   type="password"
-                  value={newUser.password}
-                  onChange={(e) => setNewUser({ ...newUser, password: e.target.value })}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
-                  placeholder="Enter password"
+                  value={form.password}
+                  onChange={handleChange}
+                  placeholder="8-16 chars, 1 uppercase, 1 special"
+                  className={inputCls('password')}
                 />
+                {formErrors.password && <p className="mt-1 text-xs text-red-500">{formErrors.password}</p>}
               </div>
 
+              {/* Role */}
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Role
-                </label>
-                <select
-                  value={newUser.role}
-                  onChange={(e) => setNewUser({ ...newUser, role: e.target.value })}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
-                >
-                  <option value="user">Normal User</option>
-                  <option value="store_owner">Store Owner</option>
-                  <option value="admin">Admin</option>
-                </select>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Role</label>
+                <div className="grid grid-cols-3 gap-2">
+                  {[
+                    { value: 'user',        label: 'Normal User' },
+                    { value: 'store_owner', label: 'Store Owner' },
+                    { value: 'admin',       label: 'Admin' },
+                  ].map(({ value, label }) => (
+                    <button
+                      key={value}
+                      type="button"
+                      onClick={() => setForm((p) => ({ ...p, role: value }))}
+                      className={`py-2 rounded-lg border text-xs font-medium transition-all
+                        ${form.role === value
+                          ? 'border-indigo-500 bg-indigo-50 text-indigo-700'
+                          : 'border-gray-200 text-gray-500 hover:border-gray-300'}`}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
               </div>
 
-              <div className="flex gap-2 pt-4">
+              {/* Actions */}
+              <div className="flex gap-3 pt-2">
                 <button
                   type="submit"
-                  className="flex-1 bg-indigo-600 text-white py-2 rounded-lg hover:bg-indigo-700 transition"
+                  disabled={saving}
+                  className="flex-1 flex items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-700
+                    disabled:opacity-60 text-white font-semibold py-2.5 rounded-lg transition text-sm"
                 >
-                  Add User
+                  {saving
+                    ? <span className="animate-spin rounded-full h-4 w-4 border-2 border-white/30 border-t-white" />
+                    : <UserPlus className="w-4 h-4" />}
+                  {saving ? 'Adding…' : 'Add User'}
                 </button>
                 <button
                   type="button"
-                  onClick={() => setShowModal(false)}
-                  className="flex-1 bg-gray-300 text-gray-700 py-2 rounded-lg hover:bg-gray-400 transition"
+                  onClick={closeModal}
+                  className="flex-1 bg-gray-100 hover:bg-gray-200 text-gray-700 font-semibold py-2.5 rounded-lg transition text-sm"
                 >
                   Cancel
                 </button>

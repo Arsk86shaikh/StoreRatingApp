@@ -1,19 +1,13 @@
-import { Navigate, Outlet } from 'react-router-dom'
-import { useAuth } from '../contexts/AuthContext'
+// src/routes/RoleBasedRoute.jsx
+import { Navigate, Outlet } from 'react-router-dom';
+import { useAuth } from '../contexts/AuthContext';
+import RouteSpinner from '../components/common/RouteSpinner';
 
-export default function RoleBasedRoute({ allowedRoles }) {
-  const { user, loading } = useAuth()
-
-  if (loading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center">
-        <span className="animate-spin rounded-full h-6 w-6 border-b-2 border-indigo-600" />
-      </div>
-    )
-  }
-
-  if (!user) return <Navigate to="/login" replace />
-  if (!allowedRoles.includes(user.role)) return <Navigate to="/unauthorized" replace />
-
-  return <Outlet />
+export default function RoleBasedRoute({ roles }) {
+  const { isAuthenticated, role, loading, profile } = useAuth();
+  if (loading) return <RouteSpinner />;
+  if (!isAuthenticated) return <Navigate to="/login" replace />;
+  if (!profile) return <RouteSpinner />;  // wait for profile before role check
+  if (!roles.includes(role)) return <Navigate to="/unauthorized" replace />;
+  return <Outlet />;
 }

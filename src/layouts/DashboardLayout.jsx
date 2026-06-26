@@ -1,33 +1,28 @@
+// src/layouts/DashboardLayout.jsx
 import { useState } from 'react';
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 
 export default function DashboardLayout() {
-  const { user, profile, signOut } = useAuth();
+  const { profile, logout } = useAuth(); // ← fixed: was { user, profile, signOut }
   const navigate = useNavigate();
   const location = useLocation();
   const [sidebarOpen, setSidebarOpen] = useState(true);
 
   const handleSignOut = async () => {
     if (window.confirm('Are you sure you want to sign out?')) {
-      await signOut();
+      await logout(); // ← fixed: was signOut()
       navigate('/login', { replace: true });
     }
   };
 
-  // Determine which menu items to show based on role
   const getMenuItems = () => {
-    const baseItems = [
-      { label: 'Dashboard', path: '/dashboard/user', icon: '📊' },
-      { label: 'Browse Stores', path: '/user/stores', icon: '🏪' },
-      { label: 'Profile', path: '/user/profile', icon: '👤' },
-    ];
-
     if (profile?.role === 'admin') {
       return [
         { label: 'Admin Dashboard', path: '/admin/dashboard', icon: '⚙️' },
         { label: 'Manage Users', path: '/admin/users', icon: '👥' },
         { label: 'Manage Stores', path: '/admin/stores', icon: '🏪' },
+        { label: 'Profile', path: '/admin/profile', icon: '👤' },
       ];
     }
 
@@ -39,7 +34,12 @@ export default function DashboardLayout() {
       ];
     }
 
-    return baseItems;
+    // default: normal user
+    return [
+      { label: 'Dashboard', path: '/user/dashboard', icon: '📊' },
+      { label: 'Browse Stores', path: '/user/stores', icon: '🏪' },
+      { label: 'Profile', path: '/user/profile', icon: '👤' },
+    ];
   };
 
   const menuItems = getMenuItems();
@@ -61,9 +61,7 @@ export default function DashboardLayout() {
           >
             {sidebarOpen ? '◀' : '▶'}
           </button>
-          {sidebarOpen && (
-            <h1 className="text-2xl font-bold ml-2">StoreRate</h1>
-          )}
+          {sidebarOpen && <h1 className="text-2xl font-bold ml-2">StoreRate</h1>}
         </div>
 
         {/* Menu Items */}
@@ -85,11 +83,11 @@ export default function DashboardLayout() {
           ))}
         </nav>
 
-        {/* User Profile & Sign Out */}
+        {/* User info + sign out */}
         <div className="border-t border-indigo-600 p-4">
           <div className="flex items-center gap-3 mb-4 pb-4 border-b border-indigo-600">
-            <div className="w-10 h-10 bg-indigo-600 rounded-full flex items-center justify-center text-lg">
-              {profile?.full_name?.charAt(0).toUpperCase() || '👤'}
+            <div className="w-10 h-10 bg-indigo-500 rounded-full flex items-center justify-center text-lg font-bold">
+              {profile?.full_name?.charAt(0).toUpperCase() || '?'}
             </div>
             {sidebarOpen && (
               <div className="flex-1 min-w-0">
@@ -97,14 +95,19 @@ export default function DashboardLayout() {
                   {profile?.full_name || 'User'}
                 </p>
                 <p className="text-xs text-indigo-200 truncate capitalize">
-                  {profile?.role || 'user'}
+                  {profile?.role?.replace('_', ' ') || 'user'}
+                </p>
+                <p className="text-xs text-indigo-300 truncate">
+                  {profile?.email}
                 </p>
               </div>
             )}
           </div>
+
           <button
             onClick={handleSignOut}
-            className="w-full flex items-center gap-3 px-4 py-2 bg-red-600 hover:bg-red-700 rounded-lg transition font-medium"
+            className="w-full flex items-center gap-3 px-4 py-2 bg-red-600 hover:bg-red-700
+              rounded-lg transition font-medium"
           >
             <span className="text-lg">🚪</span>
             {sidebarOpen && <span>Sign Out</span>}
@@ -121,10 +124,11 @@ export default function DashboardLayout() {
               {menuItems.find((item) => isActive(item.path))?.label || 'Dashboard'}
             </h2>
           </div>
-          <div className="flex items-center gap-4">
-            <span className="text-gray-600 text-sm">
-              {user?.email}
+          <div className="flex items-center gap-3">
+            <span className="text-xs text-gray-400 capitalize bg-gray-100 px-2 py-1 rounded-full">
+              {profile?.role?.replace('_', ' ') || ''}
             </span>
+            <span className="text-sm text-gray-600">{profile?.email}</span>
           </div>
         </header>
 

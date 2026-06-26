@@ -1,27 +1,11 @@
-import { Navigate } from 'react-router-dom';
+// src/routes/ProtectedRoute.jsx
+import { Navigate, Outlet } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
+import RouteSpinner from '../components/common/RouteSpinner';
 
-export default function ProtectedRoute({ children, requiredRole }) {
-  const { isAuthenticated, loading, role } = useAuth();
-
-  if (loading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-100">
-        <div className="text-center">
-          <div className="inline-block animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
-          <p className="mt-4 text-gray-600">Loading...</p>
-        </div>
-      </div>
-    );
-  }
-
-  if (!isAuthenticated) {
-    return <Navigate to="/login" replace />;
-  }
-
-  if (requiredRole && role !== requiredRole) {
-    return <Navigate to="/unauthorized" replace />;
-  }
-
-  return children;
+export default function ProtectedRoute() {
+  const { isAuthenticated, loading } = useAuth();
+  if (loading) return <RouteSpinner />;
+  if (!isAuthenticated) return <Navigate to="/login" replace />;
+  return <Outlet />;
 }
