@@ -1,24 +1,27 @@
 // src/pages/common/Profile.jsx
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import { authService } from '../../services/authService';
+import { storeService } from '../../services/storeService';
 import {
   User, Mail, MapPin, Shield, Calendar, Store,
   Lock, Eye, EyeOff, CheckCircle2, AlertCircle,
 } from 'lucide-react';
 
 const ROLE_META = {
-  admin:       { label: 'Administrator', badge: 'bg-red-100 text-red-700',    icon: Shield },
+  admin:       { label: 'Administrator', badge: 'bg-red-100 text-red-700',       icon: Shield },
   store_owner: { label: 'Store Owner',   badge: 'bg-purple-100 text-purple-700', icon: Store  },
-  user:        { label: 'Normal User',   badge: 'bg-blue-100 text-blue-700',  icon: User   },
+  user:        { label: 'Normal User',   badge: 'bg-blue-100 text-blue-700',     icon: User   },
 };
 
 // ── Password tab ──────────────────────────────────────────────
-function PasswordTab() {
-  const [form, setForm] = useState({ current: '', next: '', confirm: '' });
-  const [errors, setErrors]     = useState({});
-  const [loading, setLoading]   = useState(false);
-  const [success, setSuccess]   = useState('');
+// Receives `email` as a prop from the parent — fixes the previous
+// useAuthSnapshot()/_email bug, which referenced things that didn't exist.
+function PasswordTab({ email }) {
+  const [form, setForm]       = useState({ current: '', next: '', confirm: '' });
+  const [errors, setErrors]   = useState({});
+  const [loading, setLoading] = useState(false);
+  const [success, setSuccess] = useState('');
   const [serverErr, setServerErr] = useState('');
   const [show, setShow] = useState({ current: false, next: false, confirm: false });
 
@@ -38,9 +41,9 @@ function PasswordTab() {
     if (!form.next)    errs.next    = 'New password is required';
     else if (form.next.length < 8)  errs.next = 'Min 8 characters';
     else if (form.next.length > 16) errs.next = 'Max 16 characters';
-    else if (!/[A-Z]/.test(form.next))              errs.next = 'Needs one uppercase letter';
+    else if (!/[A-Z]/.test(form.next))                  errs.next = 'Needs one uppercase letter';
     else if (!/[!@#$%^&*(),.?":{}|<>]/.test(form.next)) errs.next = 'Needs one special character';
-    if (!form.confirm) errs.confirm = 'Please confirm new password';
+    if (!form.confirm)                   errs.confirm = 'Please confirm new password';
     else if (form.next !== form.confirm) errs.confirm = 'Passwords do not match';
     return errs;
   };
@@ -50,16 +53,26 @@ function PasswordTab() {
     const errs = validate();
     if (Object.keys(errs).length) { setErrors(errs); return; }
 
+    if (!email) {
+      setServerErr('Could not determine your account email. Please refresh and try again.');
+      return;
+    }
+
     setLoading(true);
     try {
-      // Re-authenticate with current password first
-      const { profile } = useAuthSnapshot(); // see note below — we pass profile in from parent
-      await authService.signIn({ email: _email, password: form.current });
+      // Re-authenticate with the current password before changing it,
+      // so anyone who left a tab open can't silently change the password.
+      await authService.signIn({ email, password: form.current });
       await authService.updatePassword(form.next);
       setSuccess('Password updated successfully.');
       setForm({ current: '', next: '', confirm: '' });
     } catch (err) {
-      setServerErr(err.message || 'Failed to update password.');
+      const msg = err.message?.toLowerCase() || '';
+      if (msg.includes('invalid login credentials')) {
+        setServerErr('Current password is incorrect.');
+      } else {
+        setServerErr(err.message || 'Failed to update password.');
+      }
     } finally {
       setLoading(false);
     }
@@ -85,8 +98,8 @@ function PasswordTab() {
       )}
 
       {[
-        { name: 'current', label: 'Current password',  key: 'current' },
-        { name: 'next',    label: 'New password',       key: 'next'    },
+        { name: 'current', label: 'Current password',    key: 'current' },
+        { name: 'next',    label: 'New password',         key: 'next'    },
         { name: 'confirm', label: 'Confirm new password', key: 'confirm' },
       ].map(({ name, label, key }) => (
         <div key={name}>
@@ -97,10 +110,10 @@ function PasswordTab() {
               name={name}
               value={form[name]}
               onChange={handleChange}
+              autoComplete={name === 'current' ? 'current-password' : 'new-password'}
               className={inputCls(name)}
             />
-            <button type="button" tabIndex={-1}
-              onClick={() => toggle(key)}
+            <button type="button" tabIndex={-1} onClick={() => toggle(key)}
               className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
               {show[key] ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
             </button>
@@ -154,17 +167,21 @@ function AdminProfileExtra() {
 
 // ── Store-owner-specific extra info ──────────────────────────
 function OwnerProfileExtra({ profile }) {
-  const [store, setStore]   = useState(null);
+  const [store, setStore]     = useState(null);
   const [loading, setLoading] = useState(true);
 
-  useState(() => {
-    if (!profile?.id) return;
-    import('../../services/storeService').then(({ storeService }) => {
-      storeService.getStoreByOwner(profile.id)
-        .then(setStore)
-        .catch(console.error)
-        .finally(() => setLoading(false));
-    });
+  // Fixed: useState is not an effect hook — useState(() => {...}, [deps])
+  // is invalid and never runs on dependency change. Switched to useEffect.
+  useEffect(() => {
+    if (!profile?.id) { setLoading(false); return; }
+    let cancelled = false;
+
+    storeService.getStoreByOwner(profile.id)
+      .then((data) => { if (!cancelled) setStore(data); })
+      .catch(console.error)
+      .finally(() => { if (!cancelled) setLoading(false); });
+
+    return () => { cancelled = true; };
   }, [profile?.id]);
 
   if (loading) return (
@@ -183,9 +200,9 @@ function OwnerProfileExtra({ profile }) {
     <div className="space-y-3">
       <h3 className="text-sm font-semibold text-gray-700 uppercase tracking-wide">Your Store</h3>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        <InfoRow icon={Store}  label="Store Name"     value={store.name} />
-        <InfoRow icon={Mail}   label="Store Email"    value={store.email} />
-        <InfoRow icon={MapPin} label="Store Address"  value={store.address} />
+        <InfoRow icon={Store}  label="Store Name"    value={store.name} />
+        <InfoRow icon={Mail}   label="Store Email"   value={store.email} />
+        <InfoRow icon={MapPin} label="Store Address" value={store.address} />
         <div className="p-4 bg-indigo-50 border border-indigo-100 rounded-xl flex items-center gap-3">
           <div className="text-center">
             <p className="text-2xl font-bold text-indigo-700">
@@ -206,10 +223,10 @@ function OwnerProfileExtra({ profile }) {
 
 // ── Main export ───────────────────────────────────────────────
 export default function Profile() {
-  const { profile } = useAuth();            // ← fixed: was { profile, user }; use profile.email
+  const { profile } = useAuth();
   const [tab, setTab] = useState('profile');
 
-  const meta   = ROLE_META[profile?.role] || ROLE_META.user;
+  const meta = ROLE_META[profile?.role] || ROLE_META.user;
   const RoleIcon = meta.icon;
 
   const tabs = [
@@ -258,7 +275,6 @@ export default function Profile() {
       {/* Profile Info tab */}
       {tab === 'profile' && (
         <div className="space-y-5">
-          {/* Core fields */}
           <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-6 space-y-4">
             <h2 className="font-bold text-gray-900">Account Information</h2>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -274,7 +290,6 @@ export default function Profile() {
             </div>
           </div>
 
-          {/* Role-specific section */}
           <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-6 space-y-4">
             <h2 className="font-bold text-gray-900">
               {profile?.role === 'admin'       ? 'Admin Details' :

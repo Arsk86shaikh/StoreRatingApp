@@ -22,13 +22,13 @@ import UserDetails from '../pages/admin/UserDetails';
 // User pages
 import UserDashboard from '../pages/user/UserDashboard';
 import StoresPage from '../pages/user/StoresPage';
-import Profile from '../pages/user/Profile';
 
 // Owner pages
 import OwnerDashboard from '../pages/owner/OwnerDashboard';
 import StoreAnalytics from '../pages/owner/StoreAnalytics';
 
-// Shared
+// Shared — one Profile component, adapts content per role internally
+import Profile from '../pages/common/Profile';
 import NotFound from '../pages/shared/NotFound';
 import Unauthorized from '../pages/shared/Unauthorized';
 
@@ -47,13 +47,14 @@ export default function AppRoutes() {
       {/* Every route below requires a logged-in session */}
       <Route element={<ProtectedRoute />}>
 
-        {/* Admin — one guard wraps the whole subtree, not one per page */}
+        {/* Admin */}
         <Route element={<RoleBasedRoute roles={['admin']} />}>
           <Route element={<DashboardLayout />}>
-            <Route path="/admin/dashboard" element={<AdminDashboard />} />
-            <Route path="/admin/users" element={<ManageUsers />} />
+            <Route path="/admin/dashboard"     element={<AdminDashboard />} />
+            <Route path="/admin/users"         element={<ManageUsers />} />
             <Route path="/admin/users/:userId" element={<UserDetails />} />
-            <Route path="/admin/stores" element={<ManageStores />} />
+            <Route path="/admin/stores"        element={<ManageStores />} />
+            <Route path="/admin/profile"       element={<Profile />} />  {/* ← added */}
           </Route>
         </Route>
 
@@ -61,8 +62,8 @@ export default function AppRoutes() {
         <Route element={<RoleBasedRoute roles={['user']} />}>
           <Route element={<DashboardLayout />}>
             <Route path="/user/dashboard" element={<UserDashboard />} />
-            <Route path="/user/stores" element={<StoresPage />} />
-            <Route path="/user/profile" element={<Profile />} />
+            <Route path="/user/stores"    element={<StoresPage />} />
+            <Route path="/user/profile"   element={<Profile />} />
           </Route>
         </Route>
 
@@ -71,7 +72,7 @@ export default function AppRoutes() {
           <Route element={<DashboardLayout />}>
             <Route path="/owner/dashboard" element={<OwnerDashboard />} />
             <Route path="/owner/analytics" element={<StoreAnalytics />} />
-            <Route path="/owner/profile" element={<Profile />} />
+            <Route path="/owner/profile"   element={<Profile />} />
           </Route>
         </Route>
 
