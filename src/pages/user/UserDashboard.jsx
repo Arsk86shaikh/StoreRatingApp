@@ -1,3 +1,4 @@
+// src/pages/user/UserDashboard.jsx
 import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
@@ -8,7 +9,11 @@ import StoreList from '../../components/store/StoreList';
 
 export default function UserDashboard() {
   const navigate = useNavigate();
-  const { profile, user, loading: authLoading, isAuthenticated } = useAuth();
+  // AuthContext only exposes { profile, loading, logout, refreshProfile } —
+  // there is no `user` or `isAuthenticated`. Both were always undefined,
+  // which made the redirect effect below a no-op. Derive auth state from
+  // `profile` + `loading` instead, which actually exist.
+  const { profile, loading: authLoading } = useAuth();
 
   const [stores, setStores] = useState([]);
   const [userRatings, setUserRatings] = useState([]);
@@ -20,17 +25,15 @@ export default function UserDashboard() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
-  // BUG 9 FIX: only redirect after auth has finished loading AND we have
-  // confirmed there is no session at all. Redirecting on !user alone would
-  // fire during the brief window where user is null but auth is still loading.
+  // Redirect only once auth has finished loading AND there's confirmed
+  // no profile — avoids firing during the brief window where profile
+  // is still null but loading hasn't settled yet.
   useEffect(() => {
-    if (!authLoading && !isAuthenticated) {
+    if (!authLoading && !profile) {
       navigate('/login', { replace: true });
     }
-  }, [authLoading, isAuthenticated, navigate]);
+  }, [authLoading, profile, navigate]);
 
-  // BUG 4 FIX: wrap in useCallback so the function reference is stable.
-  // Passing it as a dep to useEffect is now safe — won't cause infinite loops.
   const fetchDashboardData = useCallback(async () => {
     if (!profile?.id) return;
 
@@ -38,20 +41,18 @@ export default function UserDashboard() {
       setLoading(true);
       setError(null);
 
-      // BUG 1 FIX: removed `category` and `phone` — those columns do not exist
-      // in the schema. Only select columns that actually exist in public.stores.
-      // BUG 8 FIX: query stores_with_rating view (created in schema) instead of
-      // the raw stores table so avg_rating and total_ratings come back already
-      // computed — StoreList can display per-store ratings without extra queries.
+      // FIXED: avg_rating → average_rating, rating_count not total_ratings.
+      // These are the exact column names from the stores_with_rating view:
+      //   CREATE VIEW public.stores_with_rating AS
+      //   SELECT s.*, average_rating, rating_count FROM ...
       const { data: storesData, error: storesError } = await supabase
         .from('stores_with_rating')
-        .select('id, name, email, address, avg_rating, total_ratings')
+        .select('id, name, email, address, average_rating, rating_count')
         .order('name', { ascending: true });
 
       if (storesError) throw storesError;
       setStores(storesData || []);
 
-      // Fetch this user's ratings joined with store name/address for the table
       const { data: ratingsData, error: ratingsError } = await supabase
         .from('ratings')
         .select(`
@@ -59,11 +60,7 @@ export default function UserDashboard() {
           store_id,
           rating,
           created_at,
-          stores:store_id (
-            id,
-            name,
-            address
-          )
+          stores:store_id ( id, name, address )
         `)
         .eq('user_id', profile.id)
         .order('created_at', { ascending: false });
@@ -73,7 +70,6 @@ export default function UserDashboard() {
       const ratings = ratingsData || [];
       setUserRatings(ratings);
 
-      // Stats: calculate from fetched data
       const avgRating =
         ratings.length > 0
           ? ratings.reduce((sum, r) => sum + (r.rating || 0), 0) / ratings.length
@@ -82,10 +78,10 @@ export default function UserDashboard() {
       setStats({
         totalStores: storesData?.length || 0,
         totalRatingsSubmitted: ratings.length,
-        // BUG 10 FIX: store as number here; format only at render time (once)
         averageRating: avgRating,
       });
     } catch (err) {
+      console.error('UserDashboard fetch error:', err.message);
       setError(err.message || 'Failed to load dashboard data. Please refresh the page.');
     } finally {
       setLoading(false);
@@ -100,19 +96,20 @@ export default function UserDashboard() {
 
   const handleRatingSubmit = async ({ storeId, rating }) => {
     try {
+      if (!Number.isInteger(rating) || rating < 1 || rating > 5) {
+        throw new Error('Rating must be a whole number between 1 and 5.');
+      }
+
       const existingRating = userRatings.find((r) => r.store_id === storeId);
 
       if (existingRating) {
-        // BUG 6+7 FIX: don't set updated_at manually — the DB trigger
-        // (trg_ratings_updated_at) handles this server-side, consistently.
         const { error } = await supabase
           .from('ratings')
-          .update({ rating })
+          .update({ rating, updated_at: new Date().toISOString() })
           .eq('id', existingRating.id);
 
         if (error) throw error;
       } else {
-        // BUG 6+7 FIX: don't set created_at manually either — let the DB default.
         const { error } = await supabase
           .from('ratings')
           .insert([{ store_id: storeId, user_id: profile.id, rating }]);
@@ -120,7 +117,6 @@ export default function UserDashboard() {
         if (error) throw error;
       }
 
-      // Refresh all data so stats, ratings table, and store list stay in sync
       await fetchDashboardData();
     } catch (err) {
       setError('Failed to submit rating. Please try again.');
@@ -128,9 +124,6 @@ export default function UserDashboard() {
     }
   };
 
-  // BUG 2+3 FIX: removed min-h-screen from loading/error states.
-  // This page renders inside DashboardLayout's <main> which already controls
-  // height — min-h-screen would push content outside the layout bounds.
   if (authLoading || (loading && !stores.length)) {
     return (
       <div className="flex flex-col items-center justify-center py-24 gap-4">
@@ -156,7 +149,6 @@ export default function UserDashboard() {
     );
   }
 
-  // Build rating map for O(1) lookup in StoreList
   const userRatingMap = Object.fromEntries(
     userRatings.map((r) => [r.store_id, r.rating])
   );
