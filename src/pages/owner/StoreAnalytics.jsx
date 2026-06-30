@@ -1,59 +1,64 @@
-// src/pages/owner/OwnerAnalytics.jsx
 import { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
-import { supabase } from '../../services/supabase';
-import { ChevronUp, ChevronDown } from 'lucide-react';
+import { ownerService } from '../../services/ownerService';
+import { ChevronUp, ChevronDown, RefreshCw } from 'lucide-react';
 
+// ─── Helpers ───────────────────────────────────────────────────────────────────
 const StarRow = ({ value }) => (
   <span className="inline-flex gap-0.5">
-    {[1,2,3,4,5].map((i) => (
+    {[1, 2, 3, 4, 5].map((i) => (
       <span key={i} className={`text-lg ${i <= value ? 'text-yellow-400' : 'text-gray-200'}`}>★</span>
     ))}
   </span>
 );
 
-export default function OwnerAnalytics() {
+const Spinner = () => (
+  <div className="flex justify-center items-center h-64">
+    <span className="h-10 w-10 rounded-full border-4 border-indigo-600 border-t-transparent animate-spin" />
+  </div>
+);
+
+const ErrorBanner = ({ message, onRetry }) => (
+  <div className="bg-red-50 border border-red-200 text-red-700 p-5 rounded-xl">
+    <p className="font-semibold mb-1">Failed to load analytics</p>
+    <p className="text-sm mb-3">{message}</p>
+    <button
+      onClick={onRetry}
+      className="inline-flex items-center gap-1.5 text-sm font-medium text-red-700 underline"
+    >
+      <RefreshCw className="w-3.5 h-3.5" /> Try again
+    </button>
+  </div>
+);
+
+// ─── Main component ────────────────────────────────────────────────────────────
+export default function StoreAnalytics() {
   const { profile } = useAuth();
-  const [store, setStore]     = useState(null);
-  const [ratings, setRatings] = useState([]);
-  const [summary, setSummary] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [sortKey, setSortKey] = useState('created_at');
-  const [sortAsc, setSortAsc] = useState(false);
+
+  const [store, setStore]               = useState(null);
+  const [ratings, setRatings]           = useState([]);
+  const [distribution, setDistribution] = useState({});
+  const [avgRating, setAvgRating]       = useState(null);
+  const [totalRatings, setTotalRatings] = useState(0);
+  const [loading, setLoading]           = useState(true);
+  const [error, setError]               = useState(null);
+  const [sortKey, setSortKey]           = useState('created_at');
+  const [sortAsc, setSortAsc]           = useState(false);
 
   const fetchAnalytics = useCallback(async () => {
     if (!profile?.id) return;
     setLoading(true);
+    setError(null);
     try {
-      const { data: storeData } = await supabase
-        .from('stores')
-        .select('*')
-        .eq('owner_id', profile.id)
-        .maybeSingle();
-
-      if (!storeData) { setLoading(false); return; }
-      setStore(storeData);
-
-      // Summary from the view
-      const { data: summaryData } = await supabase
-        .from('store_ratings_summary')
-        .select('average_rating, total_ratings')
-        .eq('store_id', storeData.id)
-        .maybeSingle();
-      setSummary(summaryData);
-
-      // Individual ratings — profiles not users, full_name not name
-      const { data: ratingsData } = await supabase
-        .from('ratings')
-        .select(`
-          id, rating, created_at,
-          profiles ( full_name, email )
-        `)                                    // ← fixed: was users(name, email)
-        .eq('store_id', storeData.id);
-
-      setRatings(ratingsData || []);
+      const data = await ownerService.getAnalytics(profile.id);
+      setStore(data.store);
+      setAvgRating(data.avgRating);
+      setTotalRatings(data.totalRatings);
+      setRatings(data.ratings);
+      setDistribution(data.distribution);
     } catch (err) {
-      console.error('OwnerAnalytics fetch error:', err.message);
+      console.error('StoreAnalytics:', err);
+      setError(err.message || 'Could not reach the server. Check your connection.');
     } finally {
       setLoading(false);
     }
@@ -61,48 +66,52 @@ export default function OwnerAnalytics() {
 
   useEffect(() => { fetchAnalytics(); }, [fetchAnalytics]);
 
+  // ── Sort ─────────────────────────────────────────────────────────────────────
   const toggleSort = (key) => {
     if (sortKey === key) setSortAsc((p) => !p);
     else { setSortKey(key); setSortAsc(true); }
   };
 
-  const SortIcon = ({ col }) =>
-    sortKey !== col ? null : sortAsc
-      ? <ChevronUp className="w-3 h-3 inline ml-1" />
-      : <ChevronDown className="w-3 h-3 inline ml-1" />;
+  const SortIndicator = ({ col }) => {
+    if (sortKey !== col) return null;
+    return sortAsc
+      ? <ChevronUp   className="w-3 h-3 inline ml-1 text-indigo-600" />
+      : <ChevronDown className="w-3 h-3 inline ml-1 text-indigo-600" />;
+  };
 
   const sorted = [...ratings].sort((a, b) => {
     let av, bv;
     if (sortKey === 'rating') {
       av = a.rating; bv = b.rating;
     } else if (sortKey === 'full_name') {
-      av = (a.profiles?.full_name || '').toLowerCase();   // ← fixed
+      av = (a.profiles?.full_name || '').toLowerCase();
       bv = (b.profiles?.full_name || '').toLowerCase();
+    } else if (sortKey === 'email') {
+      av = (a.profiles?.email || '').toLowerCase();
+      bv = (b.profiles?.email || '').toLowerCase();
     } else {
-      av = new Date(a.created_at);
-      bv = new Date(b.created_at);
+      av = new Date(a.created_at).getTime();
+      bv = new Date(b.created_at).getTime();
     }
     if (av < bv) return sortAsc ? -1 : 1;
     if (av > bv) return sortAsc ? 1 : -1;
     return 0;
   });
 
-  const distribution = { 5:0, 4:0, 3:0, 2:0, 1:0 };
-  ratings.forEach((r) => { distribution[r.rating]++; });
-  const maxDist = Math.max(...Object.values(distribution), 1);
-
-  if (loading) return (
-    <div className="flex justify-center items-center h-96">
-      <span className="h-10 w-10 rounded-full border-4 border-indigo-600 border-t-transparent animate-spin" />
-    </div>
-  );
+  // ── States ───────────────────────────────────────────────────────────────────
+  if (loading) return <Spinner />;
+  if (error)   return <ErrorBanner message={error} onRetry={fetchAnalytics} />;
 
   if (!store) return (
     <div className="bg-blue-50 border border-blue-200 text-blue-800 p-5 rounded-xl text-sm">
-      No store assigned to your account.
+      No store assigned to your account. Set one up from the dashboard first.
     </div>
   );
 
+  const avg = avgRating !== null ? Number(avgRating).toFixed(2) : '—';
+  const maxDist = Math.max(...Object.values(distribution), 1);
+
+  // ── Render ───────────────────────────────────────────────────────────────────
   return (
     <div className="space-y-6">
       <div>
@@ -110,31 +119,31 @@ export default function OwnerAnalytics() {
         <p className="text-gray-500 text-sm mt-1">"{store.name}"</p>
       </div>
 
-      {/* Summary row */}
-      {summary && (
-        <div className="grid grid-cols-2 gap-4">
-          <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-5 text-center">
-            <p className="text-xs text-gray-500 uppercase tracking-wide font-medium mb-1">Average Rating</p>
-            <p className="text-3xl font-bold text-gray-900">{Number(summary.average_rating).toFixed(2)}</p>
+      {/* Summary cards */}
+      <div className="grid grid-cols-2 gap-4">
+        <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-5 text-center">
+          <p className="text-xs text-gray-500 uppercase tracking-wide font-medium mb-1">Average Rating</p>
+          <p className="text-3xl font-bold text-gray-900">{avg}</p>
+          {avgRating !== null && (
             <div className="flex justify-center mt-1">
-              <StarRow value={Math.round(Number(summary.average_rating))} />
+              <StarRow value={Math.round(Number(avgRating))} />
             </div>
-          </div>
-          <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-5 text-center">
-            <p className="text-xs text-gray-500 uppercase tracking-wide font-medium mb-1">Total Ratings</p>
-            <p className="text-3xl font-bold text-gray-900">{summary.total_ratings}</p>
-            <p className="text-xs text-gray-400 mt-1">from {ratings.length} users</p>
-          </div>
+          )}
         </div>
-      )}
+        <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-5 text-center">
+          <p className="text-xs text-gray-500 uppercase tracking-wide font-medium mb-1">Total Ratings</p>
+          <p className="text-3xl font-bold text-gray-900">{totalRatings}</p>
+          <p className="text-xs text-gray-400 mt-1">from {ratings.length} users</p>
+        </div>
+      </div>
 
-      {/* Rating distribution — visual bar chart */}
+      {/* Rating distribution */}
       <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-6">
         <h2 className="font-bold text-gray-900 mb-5">Rating Distribution</h2>
         <div className="space-y-3">
-          {[5,4,3,2,1].map((star) => {
-            const count = distribution[star];
-            const pct = Math.round((count / maxDist) * 100);
+          {[5, 4, 3, 2, 1].map((star) => {
+            const count = distribution[String(star)] ?? 0;
+            const pct   = Math.round((count / maxDist) * 100);
             return (
               <div key={star} className="flex items-center gap-3 text-sm">
                 <span className="w-6 text-right font-semibold text-gray-700">{star}</span>
@@ -152,7 +161,7 @@ export default function OwnerAnalytics() {
         </div>
       </div>
 
-      {/* Ratings table with clickable sort headers */}
+      {/* All ratings — sortable table */}
       <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
         <div className="px-6 py-4 border-b border-gray-100">
           <h2 className="font-bold text-gray-900">All Ratings</h2>
@@ -162,17 +171,18 @@ export default function OwnerAnalytics() {
             <thead className="bg-gray-50 border-b border-gray-100">
               <tr>
                 {[
-                  { key: 'full_name', label: 'User' },
-                  { key: 'email',     label: 'Email' },
-                  { key: 'rating',    label: 'Rating' },
-                  { key: 'created_at',label: 'Date' },
+                  { key: 'full_name',  label: 'User'   },
+                  { key: 'email',      label: 'Email'  },
+                  { key: 'rating',     label: 'Rating' },
+                  { key: 'created_at', label: 'Date'   },
                 ].map(({ key, label }) => (
                   <th
                     key={key}
                     onClick={() => toggleSort(key)}
-                    className="px-5 py-3 text-left font-semibold text-gray-600 cursor-pointer select-none hover:text-gray-900"
+                    className="px-5 py-3 text-left font-semibold text-gray-600 cursor-pointer select-none hover:text-gray-900 whitespace-nowrap"
                   >
-                    {label}<SortIcon col={key} />
+                    {label}
+                    <SortIndicator col={key} />
                   </th>
                 ))}
               </tr>
@@ -187,10 +197,10 @@ export default function OwnerAnalytics() {
               ) : sorted.map((r) => (
                 <tr key={r.id} className="hover:bg-gray-50 transition-colors">
                   <td className="px-5 py-3.5 font-medium text-gray-900">
-                    {r.profiles?.full_name || 'Anonymous'}   {/* ← fixed */}
+                    {r.profiles?.full_name || 'Anonymous'}
                   </td>
                   <td className="px-5 py-3.5 text-gray-500">
-                    {r.profiles?.email || '—'}               {/* ← fixed */}
+                    {r.profiles?.email || '—'}
                   </td>
                   <td className="px-5 py-3.5">
                     <span className="inline-flex items-center gap-1.5">
@@ -198,10 +208,9 @@ export default function OwnerAnalytics() {
                       <span className="font-bold text-gray-700 ml-1">{r.rating}</span>
                     </span>
                   </td>
-                  <td className="px-5 py-3.5 text-gray-500">
+                  <td className="px-5 py-3.5 text-gray-500 whitespace-nowrap">
                     {new Date(r.created_at).toLocaleDateString('en-US', {
                       year: 'numeric', month: 'short', day: 'numeric',
-                      hour: '2-digit', minute: '2-digit',
                     })}
                   </td>
                 </tr>

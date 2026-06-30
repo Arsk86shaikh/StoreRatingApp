@@ -1,7 +1,6 @@
-// src/pages/admin/UserDetails.jsx
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { supabase } from '../../services/supabase';
+import { adminService } from '../../services/adminService';
 import { ArrowLeft, AlertCircle } from 'lucide-react';
 
 const ROLE_BADGE = {
@@ -36,96 +35,52 @@ function InfoRow({ label, value, span = 1 }) {
 
 export default function UserDetails() {
   const { userId } = useParams();
-  const navigate   = useNavigate();
+  const navigate = useNavigate();
 
-  const [user,      setUser]      = useState(null);
-  const [ratings,   setRatings]   = useState([]);
-  const [avgRating, setAvgRating] = useState(null);
-  const [loading,   setLoading]   = useState(true);
+  const [user, setUser] = useState(null);
+  const [storeDetail, setStoreDetail] = useState(null);
+  const [ratings, setRatings] = useState([]);
+  const [loading, setLoading] = useState(true);
   const [fetchError, setFetchError] = useState('');
 
-  useEffect(() => {
+  // UD-1+2 FIX: use adminService.getUserDetail instead of duplicating the
+  // query inline. adminService correctly uses stores_with_rating with
+  // avg_rating/total_ratings columns — the previous inline version queried
+  // a non-existent store_ratings_summary view with wrong column names.
+  const fetchDetail = useCallback(async () => {
     if (!userId) return;
+    setLoading(true);
+    setFetchError('');
 
-    const run = async () => {
-      setLoading(true);
-      setFetchError('');
+    try {
+      const result = await adminService.getUserDetail(userId);
 
-      // ── 1. Fetch profile ──────────────────────────────────
-      const { data: profile, error: profileError } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('id', userId)
-        .maybeSingle();         // ← maybeSingle: no error when row is absent
-
-      if (profileError) {
-        setFetchError(`Database error: ${profileError.message}`);
-        setLoading(false);
-        return;
-      }
-
-      if (!profile) {
-        // Row missing — most likely a pre-trigger user. Show a helpful message.
+      if (!result) {
         setFetchError(
           'Profile row not found. This user exists in Auth but has no profiles record. ' +
-          'Run the SQL backfill query in the Supabase dashboard to fix it.'
+          'This can happen if the signup database trigger has not run yet — try refreshing in a moment.'
         );
-        setLoading(false);
         return;
       }
 
-      setUser(profile);
-
-      // ── 2. Ratings — branch by role ───────────────────────
-      if (profile.role === 'store_owner') {
-        const { data: store } = await supabase
-          .from('stores')
-          .select('id, name')
-          .eq('owner_id', userId)
-          .maybeSingle();
-
-        if (store) {
-          const [{ data: summary }, { data: ratingRows }] = await Promise.all([
-            supabase
-              .from('store_ratings_summary')
-              .select('average_rating, total_ratings')
-              .eq('store_id', store.id)
-              .maybeSingle(),
-            supabase
-              .from('ratings')
-              .select('id, rating, created_at, profiles ( full_name )')
-              .eq('store_id', store.id)
-              .order('created_at', { ascending: false }),
-          ]);
-
-          setAvgRating(summary);
-          setRatings(ratingRows || []);
-        }
-      } else if (profile.role === 'user') {
-        const { data: ratingRows } = await supabase
-          .from('ratings')
-          .select('id, rating, created_at, stores ( name )')
-          .eq('user_id', userId)
-          .order('created_at', { ascending: false });
-
-        setRatings(ratingRows || []);
-      }
-      // admin role: no ratings to show
-
+      setUser(result.profile);
+      setStoreDetail(result.storeDetail);
+      setRatings(result.ratings);
+    } catch (err) {
+      setFetchError(err.message || 'Failed to load user details.');
+    } finally {
       setLoading(false);
-    };
-
-    run();
+    }
   }, [userId]);
 
-  // ── Loading ───────────────────────────────────────────────
+  useEffect(() => { fetchDetail(); }, [fetchDetail]);
+
   if (loading) return (
     <div className="flex justify-center items-center h-96">
       <span className="h-10 w-10 rounded-full border-4 border-indigo-600 border-t-transparent animate-spin" />
     </div>
   );
 
-  // ── Error / not found ─────────────────────────────────────
   if (fetchError) return (
     <div className="space-y-4 max-w-2xl">
       <button
@@ -144,7 +99,6 @@ export default function UserDetails() {
     </div>
   );
 
-  // ── Render ────────────────────────────────────────────────
   return (
     <div className="space-y-6 max-w-3xl">
       <button
@@ -169,22 +123,33 @@ export default function UserDetails() {
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-          <InfoRow label="Email"        value={user.email} />
-          <InfoRow label="Address"      value={user.address} span={2} />
+          <InfoRow label="Email" value={user.email} />
+          <InfoRow label="Address" value={user.address} span={2} />
           <InfoRow label="Member since" value={new Date(user.created_at).toLocaleDateString()} />
           <InfoRow label="Last updated" value={new Date(user.updated_at).toLocaleDateString()} />
 
-          {user.role === 'store_owner' && avgRating && (
+          {/* Spec requirement: store owner's rating must display in their details */}
+          {user.role === 'store_owner' && storeDetail && (
             <>
               <InfoRow
                 label="Store average rating"
-                value={`${Number(avgRating.average_rating).toFixed(2)} / 5`}
+                value={
+                  storeDetail.avg_rating > 0
+                    ? `${Number(storeDetail.avg_rating).toFixed(2)} / 5`
+                    : 'No ratings yet'
+                }
               />
               <InfoRow
                 label="Total ratings received"
-                value={String(avgRating.total_ratings)}
+                value={String(storeDetail.total_ratings ?? 0)}
               />
             </>
+          )}
+
+          {user.role === 'store_owner' && !storeDetail && (
+            <div className="md:col-span-2 mt-1 p-3 bg-amber-50 border border-amber-100 rounded-lg text-xs text-amber-700 font-medium">
+              No store is assigned to this owner yet.
+            </div>
           )}
 
           {user.role === 'admin' && (
@@ -220,7 +185,7 @@ export default function UserDetails() {
                     <td className="px-5 py-3.5 text-gray-900 font-medium">
                       {user.role === 'store_owner'
                         ? r.profiles?.full_name || 'Anonymous'
-                        : r.stores?.name        || 'Unknown store'}
+                        : r.stores?.name || 'Unknown store'}
                     </td>
                     <td className="px-5 py-3.5">
                       <StarRow value={r.rating} />
@@ -238,7 +203,6 @@ export default function UserDetails() {
         </div>
       )}
 
-      {/* Empty state for users with no ratings yet */}
       {ratings.length === 0 && user.role !== 'admin' && (
         <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-8 text-center text-gray-400 text-sm">
           {user.role === 'store_owner'

@@ -1,7 +1,7 @@
-// src/pages/admin/ManageUsers.jsx
 import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../../services/supabase';
+import { adminService } from '../../services/adminService';
 import { AlertCircle, UserPlus, X, Eye, ChevronUp, ChevronDown, RefreshCw } from 'lucide-react';
 
 const ROLE_BADGE = {
@@ -26,6 +26,7 @@ const EMPTY_FORM = {
 
 export default function ManageUsers() {
   const navigate = useNavigate();
+
   const [users,       setUsers]       = useState([]);
   const [search,      setSearch]      = useState('');
   const [filterRole,  setFilterRole]  = useState('all');
@@ -39,7 +40,6 @@ export default function ManageUsers() {
   const [saving,      setSaving]      = useState(false);
   const [successMsg,  setSuccessMsg]  = useState('');
 
-  // ── Fetch ──────────────────────────────────────────────────
   const fetchUsers = useCallback(async () => {
     setLoading(true);
     const { data, error } = await supabase
@@ -54,7 +54,6 @@ export default function ManageUsers() {
 
   useEffect(() => { fetchUsers(); }, [fetchUsers]);
 
-  // ── Derived list (filter + sort, no extra fetch) ──────────
   const displayed = users
     .filter((u) => {
       const term = search.toLowerCase();
@@ -83,7 +82,6 @@ export default function ManageUsers() {
       ? <ChevronUp   className="w-3 h-3 inline ml-1" />
       : <ChevronDown className="w-3 h-3 inline ml-1" />;
 
-  // ── Form helpers ───────────────────────────────────────────
   const handleChange = (e) => {
     const { name, value } = e.target;
     setForm((p) => ({ ...p, [name]: value }));
@@ -116,7 +114,13 @@ export default function ManageUsers() {
     return errs;
   };
 
-  // ── Add user ───────────────────────────────────────────────
+  // FIXED: now uses adminService.createUser(), which calls the
+  // admin-create-user Edge Function (service_role key, server-side).
+  // The admin's own browser session is NEVER touched — no sign-out,
+  // no session swap, no 403 redirect. The previous client-side
+  // supabase.auth.signUp() approach always hijacked the current session
+  // into the newly created account, which is what caused the
+  // /unauthorized (403) screen you hit.
   const handleAddUser = async (e) => {
     e.preventDefault();
     const errs = validate();
@@ -126,80 +130,30 @@ export default function ManageUsers() {
     setServerError('');
 
     try {
-      // 1. Save admin session BEFORE creating the new user
-      const { data: { session: adminSession } } = await supabase.auth.getSession();
-      if (!adminSession) throw new Error('Admin session lost — please refresh and try again.');
-
-      // 2. Create the new auth user
-      const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
-        email: form.email,
+      const newUser = await adminService.createUser({
+        email: form.email.trim(),
         password: form.password,
-        options: {
-          data: {
-            full_name: form.full_name.trim(),
-            address:   form.address.trim(),
-            role:      form.role,
-          },
-        },
+        full_name: form.full_name.trim(),
+        address: form.address.trim(),
+        role: form.role,
       });
 
-      if (signUpError) throw signUpError;
-      if (!signUpData.user) throw new Error('User creation failed — email may already be in use.');
-
-      const newUserId = signUpData.user.id;
-
-      // 3. Sign out the newly-created session immediately, then restore admin
-      await supabase.auth.signOut();
-      await supabase.auth.setSession({
-        access_token:  adminSession.access_token,
-        refresh_token: adminSession.refresh_token,
-      });
-
-      // 4. Upsert the profile row directly — don't rely solely on the trigger.
-      //    This guarantees the row exists even if:
-      //      a) the trigger hasn't committed yet
-      //      b) the trigger was never installed
-      const { error: upsertError } = await supabase
-        .from('profiles')
-        .upsert({
-          id:        newUserId,
-          full_name: form.full_name.trim(),
-          email:     form.email.trim().toLowerCase(),
-          address:   form.address.trim(),
-          role:      form.role,
-        }, { onConflict: 'id' });
-
-      if (upsertError) {
-        // Not fatal — the trigger may have already created the row.
-        console.warn('Profile upsert warning:', upsertError.message);
-      }
-
-      // 5. Add the new user directly to local state so it appears instantly
-      //    without needing a full refetch (avoids the trigger-timing race).
+      // Add to local state immediately so it appears without a refetch
       setUsers((prev) => [{
-        id:         newUserId,
-        full_name:  form.full_name.trim(),
-        email:      form.email.trim().toLowerCase(),
-        address:    form.address.trim(),
-        role:       form.role,
+        id: newUser.id,
+        full_name: newUser.full_name,
+        email: newUser.email,
+        address: form.address.trim(),
+        role: newUser.role,
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
       }, ...prev]);
 
-      setSuccessMsg(`User "${form.full_name.trim()}" added successfully.`);
-      setTimeout(() => setSuccessMsg(''), 4000);
+      setSuccessMsg(`User "${newUser.full_name}" created successfully. They can log in immediately.`);
+      setTimeout(() => setSuccessMsg(''), 5000);
       closeModal();
 
     } catch (err) {
-      // If something went wrong after signOut, try to restore admin anyway
-      try {
-        const { data: { session: adminSession } } = await supabase.auth.getSession();
-        if (!adminSession) {
-          const stored = localStorage.getItem('sb-session');
-          if (stored) await supabase.auth.setSession(JSON.parse(stored));
-        }
-      } catch (_) { /* best effort */ }
-
       setServerError(err.message || 'Failed to add user. Try again.');
     } finally {
       setSaving(false);
@@ -219,7 +173,6 @@ export default function ManageUsers() {
       ? 'border-red-300 bg-red-50 focus:ring-2 focus:ring-red-200'
       : 'border-gray-200 focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100'}`;
 
-  // ── Render ─────────────────────────────────────────────────
   if (loading) return (
     <div className="flex justify-center items-center h-96">
       <span className="h-10 w-10 rounded-full border-4 border-indigo-600 border-t-transparent animate-spin" />
@@ -228,7 +181,6 @@ export default function ManageUsers() {
 
   return (
     <div className="space-y-6">
-      {/* Header */}
       <div className="flex justify-between items-start">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Manage Users</h1>
@@ -251,14 +203,12 @@ export default function ManageUsers() {
         </div>
       </div>
 
-      {/* Success toast */}
       {successMsg && (
         <div className="flex items-center gap-2 p-3.5 bg-green-50 border border-green-200 text-green-700 rounded-xl text-sm">
           <span className="text-green-500">✓</span> {successMsg}
         </div>
       )}
 
-      {/* Filters */}
       <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div>
@@ -287,7 +237,6 @@ export default function ManageUsers() {
         </div>
       </div>
 
-      {/* Table */}
       <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
@@ -343,7 +292,6 @@ export default function ManageUsers() {
           </table>
         </div>
 
-        {/* Footer count */}
         {displayed.length > 0 && (
           <div className="px-5 py-2.5 border-t border-gray-50 text-xs text-gray-400">
             Showing {displayed.length} of {users.length} users
@@ -370,7 +318,6 @@ export default function ManageUsers() {
                 </div>
               )}
 
-              {/* Full Name */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Full Name</label>
                 <input
@@ -388,7 +335,6 @@ export default function ManageUsers() {
                 </div>
               </div>
 
-              {/* Email */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Email</label>
                 <input
@@ -402,7 +348,6 @@ export default function ManageUsers() {
                 {formErrors.email && <p className="mt-1 text-xs text-red-500">{formErrors.email}</p>}
               </div>
 
-              {/* Address */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Address</label>
                 <textarea
@@ -421,7 +366,6 @@ export default function ManageUsers() {
                 </div>
               </div>
 
-              {/* Password */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Password</label>
                 <input
@@ -433,9 +377,11 @@ export default function ManageUsers() {
                   className={inputCls('password')}
                 />
                 {formErrors.password && <p className="mt-1 text-xs text-red-500">{formErrors.password}</p>}
+                <p className="mt-1 text-xs text-gray-400">
+                  The new user can log in with this password right away — no email confirmation needed for admin-created accounts.
+                </p>
               </div>
 
-              {/* Role */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Role</label>
                 <div className="grid grid-cols-3 gap-2">
@@ -459,7 +405,6 @@ export default function ManageUsers() {
                 </div>
               </div>
 
-              {/* Actions */}
               <div className="flex gap-3 pt-2">
                 <button
                   type="submit"
